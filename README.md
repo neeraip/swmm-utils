@@ -360,7 +360,7 @@ Contributions welcome! Areas of interest:
 
 ## License
 
-MIT License - see LICENSE file
+[MIT LICENSE](./LICENSE)
 
 ## Acknowledgments
 
