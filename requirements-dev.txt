@@ -1,0 +1,18 @@
+# SWMM Utils - Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Code formatting
+black>=22.0.0
+
+# Type checking
+mypy>=0.990
+
+# Linting
+flake8>=5.0.0
+
+# Optional: Parquet support for testing
+pyarrow>=10.0.0

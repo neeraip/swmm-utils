@@ -1,0 +1,8 @@
+# SWMM Utils - Core Dependencies
+# Install with: pip install -r requirements.txt
+
+# Parquet support
+pyarrow>=10.0.0
+
+# Development dependencies
+# Install with: pip install -r requirements-dev.txt
