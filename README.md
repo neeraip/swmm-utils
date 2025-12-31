@@ -358,17 +358,6 @@ Contributions welcome! Areas of interest:
 - Documentation improvements
 - More example scripts
 
-## Changelog
-
-### v0.1.0 (Current)
-- ✅ Refactored to encode/decode pattern
-- ✅ Added JSON and Parquet decoding support
-- ✅ Configurable Parquet output (single-file or multi-file)
-- ✅ Moved to `src/` layout for better package structure
-- ✅ Comprehensive test suite (23 tests)
-- ✅ Removed protobuf dependencies
-- ✅ Clean API with clear naming
-
 ## License
 
 MIT License - see LICENSE file
