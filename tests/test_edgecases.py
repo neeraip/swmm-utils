@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from swmm_utils import SwmmParser, SwmmUnparser
+from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
 
 def test_empty_sections_roundtrip(tmp_path: Path):
@@ -22,8 +22,8 @@ Example empty sections
     inp_path = tmp_path / "minimal.inp"
     inp_path.write_text(content, encoding="utf-8")
 
-    parser = SwmmParser()
-    model = parser.parse_file(str(inp_path))
+    decoder = SwmmInputDecoder()
+    model = decoder.decode_file(str(inp_path))
 
     # Model should be a dict; sections may be absent for empty files, treat as empty lists
     assert isinstance(model, dict)
@@ -31,10 +31,10 @@ Example empty sections
         val = model.get(section, [])
         assert isinstance(val, list), f"section {section} should be a list or absent"
 
-    # Unparse back to a file and ensure file is created
+    # Encode back to a file and ensure file is created
     out = tmp_path / "unparsed.inp"
-    unparser = SwmmUnparser()
-    unparser.unparse_to_file(model, str(out))
+    encoder = SwmmInputEncoder()
+    encoder.encode_to_inp_file(model, str(out))
 
     assert out.exists()
     assert out.stat().st_size > 0

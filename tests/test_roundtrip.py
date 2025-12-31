@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from swmm_utils import SwmmParser, SwmmConverter, SwmmUnparser
+from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
 
 def test_roundtrip_parse_convert_unparse(tmp_path: Path):
@@ -14,8 +14,8 @@ def test_roundtrip_parse_convert_unparse(tmp_path: Path):
         sample_inp.exists()
     ), "Sample input file data/10_Outfalls.inp must exist for this test"
 
-    parser = SwmmParser()
-    model = parser.parse_file(str(sample_inp))
+    parser = SwmmInputDecoder()
+    model = parser.decode_file(str(sample_inp))
 
     # Basic sanity checks on parsed model
     assert isinstance(model, dict)
@@ -27,9 +27,9 @@ def test_roundtrip_parse_convert_unparse(tmp_path: Path):
     }
 
     # Convert to JSON in a temporary dir
-    converter = SwmmConverter()
+    converter = SwmmInputEncoder()
     json_path = tmp_path / "model.json"
-    converter.to_json(model, str(json_path), pretty=True)
+    converter.encode_to_json(model, str(json_path), pretty=True)
     assert json_path.exists()
 
     # Load JSON and ensure it has the same top-level keys
@@ -44,14 +44,14 @@ def test_roundtrip_parse_convert_unparse(tmp_path: Path):
 
     # Unparse to a new .inp file and ensure it is created and non-empty
     out_inp = tmp_path / "roundtrip_unparsed.inp"
-    unparser = SwmmUnparser()
-    unparser.unparse_to_file(loaded, str(out_inp))
+    unparser = SwmmInputEncoder()
+    unparser.encode_to_inp_file(loaded, str(out_inp))
 
     assert out_inp.exists()
     assert out_inp.stat().st_size > 0
 
     # Re-parse the unparsed file and compare a few counts to ensure fidelity
-    reparsed = parser.parse_file(str(out_inp))
+    reparsed = parser.decode_file(str(out_inp))
     assert isinstance(reparsed, dict)
     for k in ["junctions", "outfalls", "conduits"]:
         assert len(reparsed.get(k, [])) == counts[k]

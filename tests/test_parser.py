@@ -8,7 +8,7 @@ from io import StringIO
 # Add parent directory to path for local imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "python"))
 
-from swmm_utils import SwmmParser, SwmmUnparser, SwmmConverter
+from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
 
 # Sample SWMM input for testing
@@ -91,8 +91,8 @@ S1               50.0               150.0
 @pytest.fixture
 def sample_model():
     """Parse the sample input and return the model."""
-    parser = SwmmParser()
-    model = parser.parse(StringIO(SAMPLE_INP))
+    parser = SwmmInputDecoder()
+    model = parser.decode(StringIO(SAMPLE_INP))
     return model
 
 
@@ -187,11 +187,11 @@ def test_parser_coordinates(sample_model):
 
 def test_converter_json(sample_model, tmp_path):
     """Test JSON conversion."""
-    converter = SwmmConverter()
+    converter = SwmmInputEncoder()
 
     # Convert to JSON
     json_file = tmp_path / "test.json"
-    json_str = converter.to_json(sample_model, str(json_file))
+    json_str = converter.encode_to_json(sample_model, str(json_file))
 
     assert json_file.exists()
     assert "title" in json_str
@@ -203,10 +203,10 @@ def test_converter_json(sample_model, tmp_path):
 
 def test_unparser(sample_model, tmp_path):
     """Test unparsing back to .inp format."""
-    unparser = SwmmUnparser()
+    unparser = SwmmInputEncoder()
 
     output_file = tmp_path / "test_output.inp"
-    unparser.unparse_to_file(sample_model, str(output_file))
+    unparser.encode_to_inp_file(sample_model, str(output_file))
 
     assert output_file.exists()
 
@@ -220,18 +220,18 @@ def test_unparser(sample_model, tmp_path):
 
 def test_roundtrip(tmp_path):
     """Test full round-trip: parse → unparse → parse."""
-    parser = SwmmParser()
-    unparser = SwmmUnparser()
+    parser = SwmmInputDecoder()
+    unparser = SwmmInputEncoder()
 
     # Parse original
-    model1 = parser.parse(StringIO(SAMPLE_INP))
+    model1 = parser.decode(StringIO(SAMPLE_INP))
 
     # Unparse to file
     temp_file = tmp_path / "roundtrip.inp"
-    unparser.unparse_to_file(model1, str(temp_file))
+    unparser.encode_to_inp_file(model1, str(temp_file))
 
     # Parse again
-    model2 = parser.parse_file(str(temp_file))
+    model2 = parser.decode_file(str(temp_file))
 
     # Compare key sections
     assert model1["options"]["FLOW_UNITS"] == model2["options"]["FLOW_UNITS"]
@@ -258,8 +258,8 @@ J1    100.0    15.0    0    0    0
 J2    95.0     15.0    0    0    0  ; inline
 """
 
-    parser = SwmmParser()
-    model = parser.parse(StringIO(inp_with_comments))
+    parser = SwmmInputDecoder()
+    model = parser.decode(StringIO(inp_with_comments))
 
     assert "title" in model
     assert "Test Model" in model["title"]
@@ -276,8 +276,8 @@ Minimal Model
 FLOW_UNITS    CFS
 """
 
-    parser = SwmmParser()
-    model = parser.parse(StringIO(minimal_inp))
+    parser = SwmmInputDecoder()
+    model = parser.decode(StringIO(minimal_inp))
 
     assert "title" in model
     assert "options" in model

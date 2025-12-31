@@ -11,16 +11,7 @@ __version__ = "0.1.0"
 from .decoder import SwmmInputDecoder
 from .encoder import SwmmInputEncoder
 
-# Backwards compatibility aliases (deprecated)
-SwmmParser = SwmmInputDecoder
-SwmmUnparser = SwmmInputEncoder
-SwmmConverter = SwmmInputEncoder
-
 __all__ = [
     "SwmmInputDecoder",
     "SwmmInputEncoder",
-    # Backwards compatibility
-    "SwmmParser",
-    "SwmmUnparser",
-    "SwmmConverter",
 ]

@@ -94,7 +94,6 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Comprehensive test suite (23 tests passing)
 - ✅ Full support for comments, whitespace, and formatting
 - ✅ Clean encode/decode API pattern
-- ✅ Backwards compatibility with old parser/unparser API
 
 ## Supported SWMM Sections
 
@@ -348,34 +347,6 @@ Tested on a 240-junction SWMM model (10_Outfalls.inp):
    - `[CONTROLS]` - Stored as text (complex rule syntax)
    - `[TRANSECTS]` - Multi-line format preserved
 
-## Backwards Compatibility
-
-The old API (`SwmmParser`, `SwmmUnparser`, `SwmmConverter`) is still available for backwards compatibility:
-
-```python
-# Old API (deprecated but still works)
-from swmm_utils import SwmmParser, SwmmUnparser, SwmmConverter
-
-parser = SwmmParser()
-model = parser.parse_file("model.inp")
-
-converter = SwmmConverter()
-converter.to_json(model, "model.json")
-
-unparser = SwmmUnparser()
-unparser.unparse_to_file(model, "output.inp")
-
-# New API (recommended)
-from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
-
-decoder = SwmmInputDecoder()
-model = decoder.decode_file("model.inp")
-
-encoder = SwmmInputEncoder()
-encoder.encode_to_json(model, "model.json")
-encoder.encode_to_inp_file(model, "output.inp")
-```
-
 ## Contributing
 
 Contributions welcome! Areas of interest:
@@ -395,7 +366,6 @@ Contributions welcome! Areas of interest:
 - ✅ Configurable Parquet output (single-file or multi-file)
 - ✅ Moved to `src/` layout for better package structure
 - ✅ Comprehensive test suite (23 tests)
-- ✅ Backwards compatibility with old API
 - ✅ Removed protobuf dependencies
 - ✅ Clean API with clear naming
 
