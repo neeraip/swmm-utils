@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="swmm-utils",
-    version="0.2.0",
+    version="0.2.1",
     author="NEER",
     author_email="support@neer.ai",
     description="Utilities for encoding and decoding EPA SWMM input (.inp) and report (.rpt) files to/from multiple formats",
