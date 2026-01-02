@@ -541,11 +541,9 @@ pytest tests/test_rpt.py -v
 
 All 40 tests pass, including comprehensive format conversion, round-trip tests, and report parsing.
 
-# Run specific test file
-pytest tests/test_rpt.py -v
-```
-
 ## Running Examples
+
+_Before running these examples, make sure you have the built SWMM binary executable `runswmm` in the `/bin` directory._
 
 ```bash
 # Example 1: Basic input file operations
@@ -553,9 +551,6 @@ python examples/example1/example1.py
 
 # Example 2: Report parsing with water quality
 python examples/example2/example2.py
-
-# Comprehensive parser demonstration
-python examples/demonstrate_parser.py
 ```
 
 ## Project Structure
@@ -572,22 +567,20 @@ swmm-utils/
 │       └── rpt_decoder.py       # Decode .rpt → dict
 ├── examples/
 │   ├── example1/                # Basic input file example
-│   ├── example2/                # Report parsing example
-│   └── demonstrate_parser.py   # Comprehensive demonstration
+│   └── example2/                # Report parsing example
 ├── tests/
 │   ├── test_inp.py              # Input file interface tests
 │   ├── test_inp_decoder_encoder.py  # Core parsing tests
 │   ├── test_inp_formats.py      # Format conversion tests
 │   └── test_rpt.py              # Report parser tests
-├── data/                        # Sample SWMM files (200+ models)
-├── bin/
-│   └── runswmm                  # SWMM simulation engine
+├── data/                        # Location for sample SWMM files
+├── bin/                         # Location for swmm binary executable
 ├── docs/
-│   └── SWMM_INPUT_FILE.md       # Complete SWMM format reference
+│   └── SWMM_INPUT_FILE.md       # Complete SWMM input file reference
 ├── setup.py                     # Package configuration
 ├── requirements.txt             # Core dependencies
 ├── requirements-dev.txt         # Development dependencies
-└── README.md                    # This file
+└── README.md                    # Project information
 ```
 
 ## Performance
@@ -612,7 +605,6 @@ Tested on diverse simulation results:
 
 - **[README.md](README.md)** - This file (overview and quick start)
 - **[examples/](examples/)** - Working examples with real SWMM models
-- **[REPORT_PARSER_ENHANCEMENT.md](REPORT_PARSER_ENHANCEMENT.md)** - Detailed report parser documentation
 - **[docs/SWMM_INPUT_FILE.md](docs/SWMM_INPUT_FILE.md)** - Complete SWMM format reference
 
 ## Dependencies

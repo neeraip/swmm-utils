@@ -2,13 +2,21 @@ from setuptools import setup, find_packages
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
+    # Extract description from first non-header line
+    lines = long_description.split('\n')
+    description = None
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith('#'):
+            description = line
+            break
 
 setup(
     name="swmm-utils",
     version="0.2.1",
     author="NEER",
     author_email="support@neer.ai",
-    description="Utilities for encoding and decoding EPA SWMM input (.inp) and report (.rpt) files to/from multiple formats",
+    description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/neeraip/swmm-utils",

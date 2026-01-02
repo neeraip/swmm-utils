@@ -11,7 +11,7 @@ from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
 def test_json_roundtrip(tmp_path: Path):
     """Test encoding to JSON and decoding back."""
-    sample_inp = Path("data/10_Outfalls.inp")
+    sample_inp = Path("examples/example1/example1.inp")
 
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
@@ -50,7 +50,7 @@ def test_json_string_decode():
 
 def test_parquet_roundtrip(tmp_path: Path):
     """Test encoding to Parquet (multi-file) and decoding back."""
-    sample_inp = Path("data/10_Outfalls.inp")
+    sample_inp = Path("examples/example1/example1.inp")
 
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
@@ -81,7 +81,7 @@ def test_parquet_roundtrip(tmp_path: Path):
 
 def test_parquet_single_file_roundtrip(tmp_path: Path):
     """Test encoding to Parquet (single-file) and decoding back."""
-    sample_inp = Path("data/10_Outfalls.inp")
+    sample_inp = Path("examples/example1/example1.inp")
 
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
@@ -120,7 +120,7 @@ def test_parquet_missing_directory():
 
 def test_full_roundtrip_all_formats(tmp_path: Path):
     """Test complete roundtrip: .inp → JSON → dict → Parquet → dict → .inp"""
-    sample_inp = Path("data/10_Outfalls.inp")
+    sample_inp = Path("examples/example1/example1.inp")
 
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
