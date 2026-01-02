@@ -1,0 +1,10 @@
+# Ignore output files in all example folders
+*.json
+*.parquet
+*_parquet/
+*.rpt
+*.out
+
+# Python cache
+__pycache__/
+*.pyc

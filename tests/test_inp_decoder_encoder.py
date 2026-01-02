@@ -1,4 +1,8 @@
-"""Test SWMM parser functionality."""
+"""Test SWMM .inp file decoder and encoder (low-level API).
+
+Tests the SwmmInputDecoder and SwmmInputEncoder classes for parsing
+and generating .inp files.
+"""
 
 import pytest
 import sys

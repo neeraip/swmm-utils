@@ -1,5 +1,0 @@
-# Ignore all generated output files
-*
-
-# But keep this directory in git
-!.gitignore

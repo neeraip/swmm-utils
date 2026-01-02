@@ -1,20 +1,27 @@
 # SWMM Utils
 
-Utilities for encoding and decoding EPA SWMM input files (.inp) to/from multiple formats.
+Utilities for interpreting EPA SWMM input (.inp) and report (.rpt) files.
 
-[![Tests](https://img.shields.io/badge/tests-23/23_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-40/40_passing-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.8+-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 ## Overview
 
-This project provides a comprehensive toolkit for encoding and decoding EPA SWMM (Storm Water Management Model) input files. It enables:
+This project provides a comprehensive toolkit for working with EPA SWMM (Storm Water Management Model) files. It enables:
 
-- **Multi-format support**: Decode .inp files and encode to .inp, JSON, or Parquet
-- **Round-trip conversion**: Decode → Modify → Encode without data loss
-- **Flexible Parquet output**: Single-file or multi-file Parquet modes
-- **Structured data access**: Work with SWMM models as Python dictionaries
-- **Simple API**: Clean encode/decode pattern for all formats
+### Input Files (.inp)
+- **Simple, intuitive API**: Load, modify, and save SWMM models with typed properties
+- **Multi-format support**: Work with .inp, JSON, or Parquet formats
+- **Context manager support**: Clean resource management with `with` statements
+- **Typed properties**: Access model components (junctions, conduits, etc.) with autocomplete
+- **Round-trip conversion**: Load → Modify → Save without data loss
+
+### Report Files (.rpt)
+- **Comprehensive parsing**: Extract all major sections from SWMM simulation reports
+- **Structured data access**: Access simulation results through typed properties
+- **Easy analysis**: Programmatically analyze hydraulic and hydrologic results
+- **Multiple result types**: Node depths, link flows, pumping, storage, LID performance, water quality, and more
 
 ## Quick Start
 
@@ -29,7 +36,75 @@ cd swmm-utils
 pip install -e .
 ```
 
-### Basic Usage (Python)
+### Basic Usage - Input Files
+
+```python
+from swmm_utils import SwmmInput
+
+# Load, modify, and save with context manager
+with SwmmInput("model.inp") as inp:
+    # Modify using typed properties
+    inp.title = "My Modified Model"
+    
+    # Access model components with autocomplete
+    print(f"Junctions: {len(inp.junctions)}")
+    print(f"Conduits: {len(inp.conduits)}")
+    
+    # Modify model data
+    for junction in inp.junctions:
+        junction['elevation'] = float(junction.get('elevation', 0)) + 10
+    
+    # Update options
+    inp.options['REPORT_STEP'] = '00:15:00'
+    
+    # Save to different formats
+    inp.to_inp("modified.inp")
+    inp.to_json("model.json")
+    inp.to_parquet("model.parquet", single_file=True)
+
+# Load from JSON or Parquet
+with SwmmInput("model.json") as inp:
+    print(f"Title: {inp.title}")
+    inp.to_inp("from_json.inp")
+```
+
+### Basic Usage - Report Files
+
+```python
+from swmm_utils import SwmmReport
+
+# Load and analyze simulation results
+with SwmmReport("simulation.rpt") as report:
+    # Access simulation metadata
+    print(f"SWMM Version: {report.header['version']}")
+    print(f"Flow Units: {report.analysis_options['flow_units']}")
+    
+    # Analyze node results
+    for node in report.node_depth:
+        if node['maximum_depth'] > 10:
+            print(f"Deep node: {node['name']} - {node['maximum_depth']:.2f} ft")
+    
+    # Check pump performance
+    for pump in report.pumping_summary:
+        print(f"Pump {pump['pump_name']}: {pump['percent_utilized']:.1f}% utilized")
+    
+    # Analyze subcatchment runoff
+    for sub in report.subcatchment_runoff:
+        print(f"{sub['name']}: {sub['peak_runoff']:.2f} CFS peak")
+    
+    # Check for surcharged nodes
+    if report.node_surcharge:
+        print(f"Warning: {len(report.node_surcharge)} nodes surcharged!")
+    
+    # LID performance (if applicable)
+    for lid in report.lid_performance:
+        print(f"{lid['subcatchment']}/{lid['lid_control']}: "
+              f"{lid['infil_loss']:.2f} in infiltrated")
+```
+
+### Advanced Usage - Lower-Level API
+
+For more control over input files, you can use the decoder/encoder directly:
 
 ```python
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
@@ -61,39 +136,135 @@ encoder.encode_to_parquet(model, "model_parquet/", single_file=False)
 # Encode to Parquet (single-file: all sections in one file)
 encoder.encode_to_parquet(model, "model.parquet", single_file=True)
 
-# Decode from JSON
+# Decode from JSON or Parquet
 json_model = decoder.decode_json("model.json")
-
-# Decode from Parquet (auto-detects file or directory)
 parquet_model = decoder.decode_parquet("model.parquet")
 ```
+
+## API Overview
+
+### SwmmInput (Recommended for Input Files)
+
+The high-level interface with typed properties and context manager support:
+
+- **Constructor**: `SwmmInput(filepath=None)` - Load from .inp, .json, or .parquet file (optional)
+- **Context Manager**: Use with `with` statement for clean resource management
+- **Typed Properties**: Access sections like `input.title`, `input.junctions`, `input.conduits`, etc.
+- **Output Methods**: 
+  - `to_inp(filepath)` - Save to .inp format
+  - `to_json(filepath, pretty=True)` - Save to JSON format
+  - `to_parquet(filepath, single_file=False)` - Save to Parquet format
+
+**Available Typed Properties:**
+- `title` (str)
+- `options` (dict)
+- `junctions`, `outfalls`, `storage` (lists)
+- `conduits`, `pumps`, `orifices`, `weirs` (lists)
+- `subcatchments`, `raingages` (lists)
+- `curves`, `timeseries`, `controls`, `pollutants`, `landuses` (lists)
+
+### SwmmReport (For Report Files)
+
+The high-level interface for reading SWMM simulation results:
+
+- **Constructor**: `SwmmReport(filepath=None)` - Load from .rpt file (optional)
+- **Context Manager**: Use with `with` statement for clean resource management
+- **Typed Properties**: Access results like `report.node_depth`, `report.link_flow`, etc.
+
+**Available Report Sections:**
+- `header` - Version, build, title
+- `element_count` - Count of model elements
+- `analysis_options` - Simulation settings
+- `continuity` - Mass balance (runoff, routing, quality)
+- `subcatchment_runoff` - Runoff summary by subcatchment
+- `node_depth` - Node depth statistics
+- `node_inflow` - Node inflow statistics
+- `node_flooding` - Flooded nodes
+- `node_surcharge` - Surcharged nodes
+- `storage_volume` - Storage unit performance
+- `outfall_loading` - Outfall loading statistics
+- `link_flow` - Link flow statistics
+- `flow_classification` - Flow regime classification
+- `conduit_surcharge` - Surcharged conduits
+- `pumping_summary` - Pump performance
+- `lid_performance` - LID control performance
+- `groundwater_summary` - Groundwater continuity
+- `quality_routing_continuity` - Water quality mass balance
+- `subcatchment_washoff` - Pollutant washoff
+- `link_pollutant_load` - Pollutant loads in links
+- `analysis_time` - Simulation timing
+
+### SwmmInputDecoder & SwmmInputEncoder
+
+Lower-level API for more control over input files:
+
+- **Decoder Methods**:
+  - `decode_file(filepath)` - Decode .inp file to dict
+  - `decode_json(filepath)` - Decode JSON file to dict
+  - `decode_parquet(path)` - Decode Parquet file/directory to dict
+
+- **Encoder Methods**:
+  - `encode_to_inp_file(data, filepath)` - Encode dict to .inp file
+  - `encode_to_json(data, filepath, pretty=True)` - Encode dict to JSON
+  - `encode_to_parquet(data, path, single_file=False)` - Encode dict to Parquet
+
+### SwmmReportDecoder
+
+Lower-level API for report file parsing:
+
+- **Decoder Methods**:
+  - `decode_file(filepath)` - Decode .rpt file to dict
 
 ## Architecture
 
 ```
-.inp file → Decoder → Dict Model → Encoder → .inp/JSON/Parquet
-                                   ↓
-                               Decoder
-                                   ↓
-                              Dict Model
+Input Files:
+.inp file → SwmmInput → Modify Properties → Save (.inp/JSON/Parquet)
+               ↓
+          Typed Properties
+       (title, junctions, etc.)
+
+Report Files:
+.rpt file → SwmmReport → Access Results
+               ↓
+          Typed Properties
+       (node_depth, link_flow, etc.)
 ```
 
 The architecture uses Python dictionaries as the in-memory data model:
 
-1. **Decoder**: Reads .inp, JSON, or Parquet files into Python dict structures
-2. **Encoder**: Writes dict objects to .inp, JSON, or Parquet formats
-3. **Dict Model**: Simple Python dictionaries - easy to inspect, modify, and manipulate
+1. **SwmmInput/SwmmReport**: High-level interfaces with typed properties and context managers
+2. **Decoders**: Read .inp/.rpt/JSON/Parquet files into Python dict structures
+3. **Encoders**: Write dict objects to .inp/JSON/Parquet formats (input files only)
+4. **Dict Model**: Simple Python dictionaries - easy to inspect, modify, and manipulate
 
 ## Features
 
+### Input File Features
+- ✅ Simple, intuitive API with typed properties
+- ✅ Context manager support for clean resource management
 - ✅ Decode all SWMM 5.2.4 input file sections (60+ sections)
 - ✅ Encode to .inp, JSON, and Parquet formats
 - ✅ Decode from .inp, JSON, and Parquet formats
 - ✅ Configurable Parquet output (single-file or multi-file modes)
-- ✅ Round-trip conversion (decode → encode) without data loss
-- ✅ Comprehensive test suite (23 tests passing)
+- ✅ Round-trip conversion (load → modify → save) without data loss
 - ✅ Full support for comments, whitespace, and formatting
-- ✅ Clean encode/decode API pattern
+
+### Report File Features
+- ✅ Comprehensive parsing of SWMM 5.2 report files
+- ✅ Extract 20+ report sections (hydraulics, hydrology, water quality)
+- ✅ Node results: depth, inflow, flooding, surcharge
+- ✅ Link results: flow, velocity, classification
+- ✅ Pump and storage performance metrics
+- ✅ LID (Low Impact Development) performance analysis
+- ✅ Water quality: pollutant loads, washoff, continuity
+- ✅ Groundwater and RDII tracking
+- ✅ Easy result lookup by element name
+
+### Testing
+- ✅ Comprehensive test suite (40 tests passing)
+- ✅ Input file tests (28 tests)
+- ✅ Report file tests (12 tests)
 
 ## Supported SWMM Sections
 
@@ -177,7 +348,7 @@ The architecture uses Python dictionaries as the in-memory data model:
 
 ## Examples
 
-### Example 1: Decode and Analyze
+### Example 1: Input File - Decode and Analyze
 
 ```python
 from swmm_utils import SwmmInputDecoder
@@ -196,7 +367,38 @@ for junc in model.get('junctions', []):
         print(f"High junction: {junc['name']} at {junc['elevation']}m")
 ```
 
-### Example 2: Convert for Analytics
+### Example 2: Report File - Analyze Simulation Results
+
+```python
+from swmm_utils import SwmmReport
+
+with SwmmReport("results.rpt") as report:
+    # Check for critical conditions
+    print(f"Analysis: {report.header['title']}")
+    print(f"Flow Units: {report.analysis_options.get('flow_units', 'N/A')}")
+    
+    # Find nodes with excessive depth
+    critical_nodes = [
+        node for node in report.node_depth 
+        if node['maximum_depth'] > 10
+    ]
+    print(f"\n{len(critical_nodes)} nodes exceeded 10 ft depth")
+    
+    # Analyze pump efficiency
+    if report.pumping_summary:
+        for pump in report.pumping_summary:
+            if pump['percent_utilized'] < 20:
+                print(f"Pump {pump['pump_name']} underutilized: "
+                      f"{pump['percent_utilized']:.1f}%")
+    
+    # Check system continuity
+    continuity = report.continuity.get('flow_routing', {})
+    error = continuity.get('continuity_error')
+    if error and abs(error) > 1.0:
+        print(f"Warning: Continuity error {error:.2f}%")
+```
+
+### Example 3: Convert Input Files for Analytics
 
 ```python
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
@@ -218,7 +420,40 @@ print(junctions.describe())
 print(f"Average pipe length: {conduits['length'].astype(float).mean():.2f}")
 ```
 
-### Example 3: Batch Processing
+### Example 4: Complete Workflow - Simulate and Analyze
+
+```python
+import subprocess
+from swmm_utils import SwmmInput, SwmmReport
+
+# Step 1: Modify input file
+with SwmmInput("model.inp") as inp:
+    # Increase all pipe roughness by 10%
+    for conduit in inp.conduits:
+        roughness = float(conduit.get('roughness', 0.01))
+        conduit['roughness'] = str(roughness * 1.1)
+    
+    inp.to_inp("modified.inp")
+
+# Step 2: Run SWMM simulation
+subprocess.run([
+    "./bin/runswmm", 
+    "modified.inp", 
+    "modified.rpt", 
+    "modified.out"
+])
+
+# Step 3: Analyze results
+with SwmmReport("modified.rpt") as report:
+    print(f"Simulation complete!")
+    print(f"Total runtime: {report.analysis_time.get('elapsed', 'N/A')}")
+    
+    # Compare peak flows
+    for link in report.link_flow[:10]:
+        print(f"{link['name']}: {link['maximum_flow']:.2f} CFS")
+```
+
+### Example 5: Batch Processing
 
 ```python
 from pathlib import Path
@@ -235,7 +470,34 @@ for inp_file in Path("models/").glob("*.inp"):
     print(f"Converted {inp_file.name} → {json_file.name}")
 ```
 
-### Example 4: Round-Trip Conversion
+### Example 6: LID Performance Analysis
+
+```python
+from swmm_utils import SwmmReport
+
+with SwmmReport("lid_scenario.rpt") as report:
+    # Analyze LID performance
+    if report.lid_performance:
+        # Group by subcatchment
+        from collections import defaultdict
+        by_subcatchment = defaultdict(list)
+        
+        for lid in report.lid_performance:
+            by_subcatchment[lid['subcatchment']].append(lid)
+        
+        # Calculate total infiltration per subcatchment
+        for sub, lids in by_subcatchment.items():
+            total_infil = sum(lid['infil_loss'] for lid in lids)
+            total_inflow = sum(lid['total_inflow'] for lid in lids)
+            reduction = (total_infil / total_inflow * 100) if total_inflow > 0 else 0
+            
+            print(f"{sub}: {reduction:.1f}% runoff reduction via infiltration")
+```
+
+### Example 7: Batch Processing
+
+```python
+### Example 7: Round-Trip Conversion
 
 ```python
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
@@ -274,13 +536,27 @@ pytest -q
 pytest --cov=swmm_utils --cov-report=html
 
 # Run specific test file
-pytest tests/test_formats.py -v
-
-# Run the demo
-python example/demo.py
+pytest tests/test_rpt.py -v
 ```
 
-All 23 tests pass, including comprehensive format conversion and round-trip tests.
+All 40 tests pass, including comprehensive format conversion, round-trip tests, and report parsing.
+
+# Run specific test file
+pytest tests/test_rpt.py -v
+```
+
+## Running Examples
+
+```bash
+# Example 1: Basic input file operations
+python examples/example1/example1.py
+
+# Example 2: Report parsing with water quality
+python examples/example2/example2.py
+
+# Comprehensive parser demonstration
+python examples/demonstrate_parser.py
+```
 
 ## Project Structure
 
@@ -289,18 +565,23 @@ swmm-utils/
 ├── src/
 │   └── swmm_utils/              # Main package
 │       ├── __init__.py          # Package exports
-│       ├── decoder.py           # Decode .inp/JSON/Parquet → dict
-│       └── encoder.py           # Encode dict → .inp/JSON/Parquet
-├── example/
-│   ├── demo.py                  # Comprehensive demonstration
-│   └── README.md                # Example documentation
+│       ├── inp.py               # High-level input file interface
+│       ├── inp_decoder.py       # Decode .inp/JSON/Parquet → dict
+│       ├── inp_encoder.py       # Encode dict → .inp/JSON/Parquet
+│       ├── rpt.py               # High-level report file interface
+│       └── rpt_decoder.py       # Decode .rpt → dict
+├── examples/
+│   ├── example1/                # Basic input file example
+│   ├── example2/                # Report parsing example
+│   └── demonstrate_parser.py   # Comprehensive demonstration
 ├── tests/
-│   ├── test_parser.py           # Core parsing tests
-│   ├── test_formats.py          # Format conversion tests
-│   ├── test_roundtrip.py        # Round-trip validation
-│   ├── test_edgecases.py        # Edge case tests
-│   └── README.md                # Test documentation
-├── data/                        # Sample SWMM input files
+│   ├── test_inp.py              # Input file interface tests
+│   ├── test_inp_decoder_encoder.py  # Core parsing tests
+│   ├── test_inp_formats.py      # Format conversion tests
+│   └── test_rpt.py              # Report parser tests
+├── data/                        # Sample SWMM files (200+ models)
+├── bin/
+│   └── runswmm                  # SWMM simulation engine
 ├── docs/
 │   └── SWMM_INPUT_FILE.md       # Complete SWMM format reference
 ├── setup.py                     # Package configuration
@@ -311,20 +592,28 @@ swmm-utils/
 
 ## Performance
 
-Tested on a 240-junction SWMM model (10_Outfalls.inp):
+### Input Files
+Tested on various SWMM models:
 
-- **Decode .inp**: ~0.05 seconds
-- **Encode to JSON**: 873 KB
+- **Decode .inp**: ~0.05 seconds (240 junctions)
+- **Encode to JSON**: 873 KB (240 junctions)
 - **Encode to Parquet (multi-file)**: 18 files, ~110 KB total
 - **Encode to Parquet (single-file)**: 1 file, ~109 KB
 - **Round-trip (.inp → JSON → Parquet → .inp)**: All data preserved
 
+### Report Files
+Tested on diverse simulation results:
+
+- **Parse .rpt**: ~0.02 seconds (small models) to ~0.5 seconds (large models)
+- **Large model support**: Successfully parsed 809 KB report with 2,227 nodes
+- **Memory efficient**: Processes reports on-demand without loading entire file
+
 ## Documentation
 
-- **[README.md](README.md)** - This file
-- **[example/README.md](example/README.md)** - Example usage and demo
+- **[README.md](README.md)** - This file (overview and quick start)
+- **[examples/](examples/)** - Working examples with real SWMM models
+- **[REPORT_PARSER_ENHANCEMENT.md](REPORT_PARSER_ENHANCEMENT.md)** - Detailed report parser documentation
 - **[docs/SWMM_INPUT_FILE.md](docs/SWMM_INPUT_FILE.md)** - Complete SWMM format reference
-- **[tests/README.md](tests/README.md)** - Testing guide
 
 ## Dependencies
 
@@ -338,6 +627,7 @@ Tested on a 240-junction SWMM model (10_Outfalls.inp):
 
 ## Known Limitations
 
+### Input Files
 1. **Round-trip Formatting**: Some cosmetic differences
    - Comments may not be preserved in exact original positions
    - Whitespace normalized to SWMM standard format
@@ -347,11 +637,17 @@ Tested on a 240-junction SWMM model (10_Outfalls.inp):
    - `[CONTROLS]` - Stored as text (complex rule syntax)
    - `[TRANSECTS]` - Multi-line format preserved
 
+### Report Files
+1. **Read-only**: Report files are parsed for reading only (no modification/encoding)
+2. **Section Availability**: Not all sections appear in every report (depends on simulation settings)
+3. **Format Variations**: Minor format differences across SWMM versions handled gracefully
+
 ## Contributing
 
 Contributions welcome! Areas of interest:
 
-- Enhanced validation logic
+- Enhanced validation logic for input files
+- Additional report sections or metrics
 - Model manipulation utilities
 - Performance optimization
 - Additional output formats (e.g., GeoJSON)
@@ -366,6 +662,27 @@ Contributions welcome! Areas of interest:
 
 - EPA SWMM development team for the excellent documentation
 - Apache Arrow/Parquet for columnar analytics support
+- Contributors and users who provided feedback and testing
+
+## Recent Updates
+
+### January 2026 - Report Parser
+- ✅ Added comprehensive SWMM report (.rpt) file parsing
+- ✅ Support for 20+ report sections including:
+  - Hydraulic results (nodes, links, pumps, storage)
+  - Hydrologic results (subcatchments, runoff)
+  - Water quality (pollutants, washoff, continuity)
+  - LID performance analysis
+  - System diagnostics (surcharge, flooding, flow classification)
+- ✅ High-level `SwmmReport` interface with typed properties
+- ✅ Context manager support
+- ✅ 12 new tests (40 total tests passing)
+
+### Previous - Input File Parser
+- ✅ Refactored to encode/decode pattern
+- ✅ Added high-level `SwmmInput` interface
+- ✅ Multi-format support (JSON, Parquet)
+- ✅ Comprehensive test suite
 
 ## Contact
 
@@ -373,4 +690,6 @@ For questions or issues, please open a GitHub issue.
 
 ---
 
-**Status**: ✅ Production-ready (Python implementation complete)
+**Status**: ✅ Production-ready
+- **Input Files**: Full encode/decode support for SWMM 5.2.4
+- **Report Files**: Comprehensive parsing for SWMM 5.2+ reports

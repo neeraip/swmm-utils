@@ -1,4 +1,7 @@
-"""Tests for JSON and Parquet encoding/decoding."""
+"""Test SWMM .inp file format conversions (JSON and Parquet).
+
+Tests encoding and decoding between .inp, JSON, and Parquet formats.
+"""
 
 from pathlib import Path
 import pytest
