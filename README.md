@@ -1,27 +1,18 @@
 # SWMM Utils
 
-Utilities for interpreting EPA SWMM input (.inp) and report (.rpt) files.
+Utilities for interpreting EPA SWMM input (.inp), report (.rpt), and output (.out) files.
 
-[![Tests](https://img.shields.io/badge/tests-40/40_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-69/69_passing-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.8+-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 ## Overview
 
-This project provides a comprehensive toolkit for working with EPA SWMM (Storm Water Management Model) files. It enables:
+This project provides a comprehensive toolkit for working with EPA SWMM (Storm Water Management Model) files:
 
-### Input Files (.inp)
-- **Simple, intuitive API**: Load, modify, and save SWMM models with typed properties
-- **Multi-format support**: Work with .inp, JSON, or Parquet formats
-- **Context manager support**: Clean resource management with `with` statements
-- **Typed properties**: Access model components (junctions, conduits, etc.) with autocomplete
-- **Round-trip conversion**: Load → Modify → Save without data loss
-
-### Report Files (.rpt)
-- **Comprehensive parsing**: Extract all major sections from SWMM simulation reports
-- **Structured data access**: Access simulation results through typed properties
-- **Easy analysis**: Programmatically analyze hydraulic and hydrologic results
-- **Multiple result types**: Node depths, link flows, pumping, storage, LID performance, water quality, and more
+- **[Input Files (.inp)](docs/SWMM_INPUT_FILE.md)** - Load, modify, and save SWMM models with typed properties. Support for .inp, JSON, and Parquet formats.
+- **[Report Files (.rpt)](docs/SWMM_REPORT_FILE.md)** - Parse simulation results and extract all major sections (node depths, link flows, pumping, storage, LID performance, etc.)
+- **[Output Files (.out)](docs/SWMM_OUTPUT_FILE.md)** - Extract binary SWMM output data with optional time series loading. Export to JSON or Parquet.
 
 ## Quick Start
 
@@ -36,184 +27,65 @@ cd swmm-utils
 pip install -e .
 ```
 
-### Basic Usage - Input Files
+### Basic Usage
 
+For detailed examples and API documentation for each file type, see:
+
+- **[Input Files (.inp) Usage](docs/SWMM_INPUT_FILE.md)** - Loading, modifying, and saving SWMM models
+- **[Report Files (.rpt) Usage](docs/SWMM_REPORT_FILE.md)** - Parsing and analyzing simulation results
+- **[Output Files (.out) Usage](docs/SWMM_OUTPUT_FILE.md)** - Extracting binary output data with time series
+
+**Quick example:**
 ```python
-from swmm_utils import SwmmInput
+from swmm_utils import SwmmInput, SwmmReport, SwmmOutput
 
-# Load, modify, and save with context manager
+# Input files
 with SwmmInput("model.inp") as inp:
-    # Modify using typed properties
-    inp.title = "My Modified Model"
-    
-    # Access model components with autocomplete
-    print(f"Junctions: {len(inp.junctions)}")
-    print(f"Conduits: {len(inp.conduits)}")
-    
-    # Modify model data
-    for junction in inp.junctions:
-        junction['elevation'] = float(junction.get('elevation', 0)) + 10
-    
-    # Update options
-    inp.options['REPORT_STEP'] = '00:15:00'
-    
-    # Save to different formats
-    inp.to_inp("modified.inp")
+    inp.title = "Modified Model"
     inp.to_json("model.json")
-    inp.to_parquet("model.parquet", single_file=True)
 
-# Load from JSON or Parquet
-with SwmmInput("model.json") as inp:
-    print(f"Title: {inp.title}")
-    inp.to_inp("from_json.inp")
-```
-
-### Basic Usage - Report Files
-
-```python
-from swmm_utils import SwmmReport
-
-# Load and analyze simulation results
+# Report files
 with SwmmReport("simulation.rpt") as report:
-    # Access simulation metadata
-    print(f"SWMM Version: {report.header['version']}")
-    print(f"Flow Units: {report.analysis_options['flow_units']}")
-    
-    # Analyze node results
     for node in report.node_depth:
-        if node['maximum_depth'] > 10:
-            print(f"Deep node: {node['name']} - {node['maximum_depth']:.2f} ft")
-    
-    # Check pump performance
-    for pump in report.pumping_summary:
-        print(f"Pump {pump['pump_name']}: {pump['percent_utilized']:.1f}% utilized")
-    
-    # Analyze subcatchment runoff
-    for sub in report.subcatchment_runoff:
-        print(f"{sub['name']}: {sub['peak_runoff']:.2f} CFS peak")
-    
-    # Check for surcharged nodes
-    if report.node_surcharge:
-        print(f"Warning: {len(report.node_surcharge)} nodes surcharged!")
-    
-    # LID performance (if applicable)
-    for lid in report.lid_performance:
-        print(f"{lid['subcatchment']}/{lid['lid_control']}: "
-              f"{lid['infil_loss']:.2f} in infiltrated")
+        print(f"{node['name']}: {node['maximum_depth']:.2f} ft")
+
+# Output files (metadata only or with time series)
+output = SwmmOutput("simulation.out", load_time_series=True)
+output.to_json("output_complete.json", pretty=True)
 ```
 
-### Advanced Usage - Lower-Level API
+## API Reference
 
-For more control over input files, you can use the decoder/encoder directly:
+Detailed API documentation is available in the respective docs files:
+
+- **[SwmmInput API](docs/SWMM_INPUT_FILE.md#api-reference)** - High-level interface for input files with typed properties
+- **[SwmmReport API](docs/SWMM_REPORT_FILE.md#api-reference)** - High-level interface for report files
+- **[SwmmOutput API](docs/SWMM_OUTPUT_FILE.md#api-reference)** - High-level interface for output files with optional time series loading
+
+### Core Classes
+
+All classes support context manager pattern (`with` statement) for clean resource management:
 
 ```python
-from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
+# All three file types use context managers
+with SwmmInput("model.inp") as inp:
+    ...
 
-# Decode a SWMM .inp file into a Python dict
-decoder = SwmmInputDecoder()
-model = decoder.decode_file("model.inp")
+with SwmmReport("simulation.rpt") as report:
+    ...
 
-# Access structured data
-for junction in model['junctions']:
-    print(f"{junction['name']}: elevation={junction['elevation']}")
-
-# Modify the model
-model['junctions'][0]['elevation'] = '100.5'
-model['title'] = 'Modified SWMM Model'
-
-# Encode to different formats
-encoder = SwmmInputEncoder()
-
-# Write back to .inp format
-encoder.encode_to_inp_file(model, "modified.inp")
-
-# Encode to JSON
-encoder.encode_to_json(model, "model.json", pretty=True)
-
-# Encode to Parquet (multi-file: one file per section)
-encoder.encode_to_parquet(model, "model_parquet/", single_file=False)
-
-# Encode to Parquet (single-file: all sections in one file)
-encoder.encode_to_parquet(model, "model.parquet", single_file=True)
-
-# Decode from JSON or Parquet
-json_model = decoder.decode_json("model.json")
-parquet_model = decoder.decode_parquet("model.parquet")
+with SwmmOutput("simulation.out") as output:
+    ...
 ```
 
-## API Overview
+### Lower-Level APIs (Advanced)
 
-### SwmmInput (Recommended for Input Files)
+For direct decoder/encoder access:
 
-The high-level interface with typed properties and context manager support:
+- **SwmmInputDecoder** & **SwmmInputEncoder** - Direct dict-based access to input file data
+- **SwmmReportDecoder** - Direct dict-based access to report file data
 
-- **Constructor**: `SwmmInput(filepath=None)` - Load from .inp, .json, or .parquet file (optional)
-- **Context Manager**: Use with `with` statement for clean resource management
-- **Typed Properties**: Access sections like `input.title`, `input.junctions`, `input.conduits`, etc.
-- **Output Methods**: 
-  - `to_inp(filepath)` - Save to .inp format
-  - `to_json(filepath, pretty=True)` - Save to JSON format
-  - `to_parquet(filepath, single_file=False)` - Save to Parquet format
-
-**Available Typed Properties:**
-- `title` (str)
-- `options` (dict)
-- `junctions`, `outfalls`, `storage` (lists)
-- `conduits`, `pumps`, `orifices`, `weirs` (lists)
-- `subcatchments`, `raingages` (lists)
-- `curves`, `timeseries`, `controls`, `pollutants`, `landuses` (lists)
-
-### SwmmReport (For Report Files)
-
-The high-level interface for reading SWMM simulation results:
-
-- **Constructor**: `SwmmReport(filepath=None)` - Load from .rpt file (optional)
-- **Context Manager**: Use with `with` statement for clean resource management
-- **Typed Properties**: Access results like `report.node_depth`, `report.link_flow`, etc.
-
-**Available Report Sections:**
-- `header` - Version, build, title
-- `element_count` - Count of model elements
-- `analysis_options` - Simulation settings
-- `continuity` - Mass balance (runoff, routing, quality)
-- `subcatchment_runoff` - Runoff summary by subcatchment
-- `node_depth` - Node depth statistics
-- `node_inflow` - Node inflow statistics
-- `node_flooding` - Flooded nodes
-- `node_surcharge` - Surcharged nodes
-- `storage_volume` - Storage unit performance
-- `outfall_loading` - Outfall loading statistics
-- `link_flow` - Link flow statistics
-- `flow_classification` - Flow regime classification
-- `conduit_surcharge` - Surcharged conduits
-- `pumping_summary` - Pump performance
-- `lid_performance` - LID control performance
-- `groundwater_summary` - Groundwater continuity
-- `quality_routing_continuity` - Water quality mass balance
-- `subcatchment_washoff` - Pollutant washoff
-- `link_pollutant_load` - Pollutant loads in links
-- `analysis_time` - Simulation timing
-
-### SwmmInputDecoder & SwmmInputEncoder
-
-Lower-level API for more control over input files:
-
-- **Decoder Methods**:
-  - `decode_file(filepath)` - Decode .inp file to dict
-  - `decode_json(filepath)` - Decode JSON file to dict
-  - `decode_parquet(path)` - Decode Parquet file/directory to dict
-
-- **Encoder Methods**:
-  - `encode_to_inp_file(data, filepath)` - Encode dict to .inp file
-  - `encode_to_json(data, filepath, pretty=True)` - Encode dict to JSON
-  - `encode_to_parquet(data, path, single_file=False)` - Encode dict to Parquet
-
-### SwmmReportDecoder
-
-Lower-level API for report file parsing:
-
-- **Decoder Methods**:
-  - `decode_file(filepath)` - Decode .rpt file to dict
+See [Input Files documentation](docs/SWMM_INPUT_FILE.md#lower-level-api) for details.
 
 ## Architecture
 
@@ -229,12 +101,18 @@ Report Files:
                ↓
           Typed Properties
        (node_depth, link_flow, etc.)
+
+Output Files:
+.out file → SwmmOutput → Export (JSON/Parquet)
+               ↓
+       Metadata or Time Series
+    (default: metadata only)
 ```
 
 The architecture uses Python dictionaries as the in-memory data model:
 
-1. **SwmmInput/SwmmReport**: High-level interfaces with typed properties and context managers
-2. **Decoders**: Read .inp/.rpt/JSON/Parquet files into Python dict structures
+1. **SwmmInput/SwmmReport/SwmmOutput**: High-level interfaces with typed properties and context managers
+2. **Decoders**: Read .inp/.rpt/.out/JSON/Parquet files into Python dict structures
 3. **Encoders**: Write dict objects to .inp/JSON/Parquet formats (input files only)
 4. **Dict Model**: Simple Python dictionaries - easy to inspect, modify, and manipulate
 
