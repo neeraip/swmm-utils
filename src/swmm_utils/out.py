@@ -4,6 +4,7 @@ SWMM Output File (.out) Interface
 This module provides a high-level interface for accessing SWMM output file data.
 """
 
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
@@ -182,3 +183,132 @@ class SwmmOutput:
             "n_pollutants": self.n_pollutants,
             "pollutants": self.pollutant_labels,
         }
+
+    def to_json(self, filepath: str | Path, pretty: bool = True) -> None:
+        """
+        Export output file metadata to JSON format.
+
+        Args:
+            filepath: Path where JSON file will be saved
+            pretty: Whether to pretty-print JSON (default True)
+        """
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        output_data = {
+            "header": self._data["header"],
+            "metadata": {
+                "labels": self._data["metadata"]["labels"],
+                "pollutant_units": self._data["metadata"]["pollutant_units"],
+                "properties": self._data["metadata"]["properties"],
+                "variables": self._data["metadata"]["variables"],
+                "start_date": self._data["metadata"]["start_date"].isoformat(),
+                "report_interval_seconds": self._data["metadata"][
+                    "report_interval_seconds"
+                ],
+                "n_periods": self._data["metadata"]["n_periods"],
+            },
+            "summary": self.summary(),
+        }
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(
+                output_data,
+                f,
+                indent=2 if pretty else None,
+                ensure_ascii=False,
+            )
+
+    def to_parquet(
+        self, filepath: str | Path | None = None, single_file: bool = True
+    ) -> None:
+        """
+        Export output file metadata to Parquet format.
+
+        Args:
+            filepath: Path where Parquet file will be saved. If single_file=False,
+                     this is treated as a directory path.
+            single_file: Whether to save as single file (True) or multiple files (False).
+                        If False, creates separate parquet files for each data type.
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError(
+                "pandas is required for Parquet export. Install with: pip install pandas"
+            )
+
+        try:
+            import pyarrow  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "pyarrow is required for Parquet export. Install with: pip install pyarrow"
+            )
+
+        if single_file:
+            # Export all metadata as a single parquet file
+            filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create a summary dataframe
+            summary_data = []
+            summary = self.summary()
+
+            for key, value in summary.items():
+                if isinstance(value, list):
+                    value = ", ".join(str(v) for v in value)
+                summary_data.append({"field": key, "value": str(value)})
+
+            df = pd.DataFrame(summary_data)
+            df.to_parquet(filepath, index=False)
+
+        else:
+            # Export as multiple parquet files in a directory
+            dirpath = Path(filepath)
+            dirpath.mkdir(parents=True, exist_ok=True)
+
+            # Export nodes
+            if self.node_labels:
+                nodes_data = []
+                for node_id in self.node_labels:
+                    node = self.get_node(node_id)
+                    if node:
+                        nodes_data.append(node)
+                if nodes_data:
+                    df_nodes = pd.DataFrame(nodes_data)
+                    df_nodes.to_parquet(dirpath / "nodes.parquet", index=False)
+
+            # Export links
+            if self.link_labels:
+                links_data = []
+                for link_id in self.link_labels:
+                    link = self.get_link(link_id)
+                    if link:
+                        links_data.append(link)
+                if links_data:
+                    df_links = pd.DataFrame(links_data)
+                    df_links.to_parquet(dirpath / "links.parquet", index=False)
+
+            # Export subcatchments
+            if self.subcatchment_labels:
+                subcatch_data = []
+                for subcatch_id in self.subcatchment_labels:
+                    subcatch = self.get_subcatchment(subcatch_id)
+                    if subcatch:
+                        subcatch_data.append(subcatch)
+                if subcatch_data:
+                    df_subcatch = pd.DataFrame(subcatch_data)
+                    df_subcatch.to_parquet(
+                        dirpath / "subcatchments.parquet", index=False
+                    )
+
+            # Export summary
+            summary = self.summary()
+            summary_data = []
+            for key, value in summary.items():
+                if isinstance(value, list):
+                    value = ", ".join(str(v) for v in value)
+                summary_data.append({"field": key, "value": str(value)})
+
+            df_summary = pd.DataFrame(summary_data)
+            df_summary.to_parquet(dirpath / "summary.parquet", index=False)

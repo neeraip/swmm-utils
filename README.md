@@ -261,10 +261,21 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Groundwater and RDII tracking
 - ✅ Easy result lookup by element name
 
+### Output File Features
+- ✅ Binary SWMM 5.0+ output file parsing (.out format)
+- ✅ Extract simulation time series metadata and statistics
+- ✅ Access node, link, and subcatchment properties
+- ✅ Time index generation with full timestamp support
+- ✅ Export to JSON and Parquet formats
+- ✅ Pollutant tracking and water quality data
+- ✅ Efficient memory usage (metadata-based access, not full time series loading)
+- ✅ Element lookup by name
+
 ### Testing
-- ✅ Comprehensive test suite (40 tests passing)
+- ✅ Comprehensive test suite (67 tests passing)
 - ✅ Input file tests (28 tests)
 - ✅ Report file tests (12 tests)
+- ✅ Output file tests (27 tests)
 
 ## Supported SWMM Sections
 
@@ -605,12 +616,15 @@ Tested on diverse simulation results:
 
 - **[README.md](README.md)** - This file (overview and quick start)
 - **[examples/](examples/)** - Working examples with real SWMM models
-- **[docs/SWMM_INPUT_FILE.md](docs/SWMM_INPUT_FILE.md)** - Complete SWMM format reference
+- **[docs/SWMM_INPUT_FILE.md](docs/SWMM_INPUT_FILE.md)** - Complete SWMM input file (.inp) format reference
+- **[docs/SWMM_REPORT_FILE.md](docs/SWMM_REPORT_FILE.md)** - Complete SWMM report file (.rpt) format reference  
+- **[docs/SWMM_OUTPUT_FILE.md](docs/SWMM_OUTPUT_FILE.md)** - Complete SWMM output file (.out) binary format reference
 
 ## Dependencies
 
 ### Required
 - Python 3.8+
+- pandas >= 1.0.0 (for Parquet support)
 - pyarrow >= 10.0.0 (for Parquet support)
 
 ### Development
@@ -634,54 +648,10 @@ Tested on diverse simulation results:
 2. **Section Availability**: Not all sections appear in every report (depends on simulation settings)
 3. **Format Variations**: Minor format differences across SWMM versions handled gracefully
 
-## Contributing
-
-Contributions welcome! Areas of interest:
-
-- Enhanced validation logic for input files
-- Additional report sections or metrics
-- Model manipulation utilities
-- Performance optimization
-- Additional output formats (e.g., GeoJSON)
-- Documentation improvements
-- More example scripts
-
 ## License
 
 [MIT LICENSE](./LICENSE)
 
-## Acknowledgments
-
-- EPA SWMM development team for the excellent documentation
-- Apache Arrow/Parquet for columnar analytics support
-- Contributors and users who provided feedback and testing
-
-## Recent Updates
-
-### January 2026 - Report Parser
-- ✅ Added comprehensive SWMM report (.rpt) file parsing
-- ✅ Support for 20+ report sections including:
-  - Hydraulic results (nodes, links, pumps, storage)
-  - Hydrologic results (subcatchments, runoff)
-  - Water quality (pollutants, washoff, continuity)
-  - LID performance analysis
-  - System diagnostics (surcharge, flooding, flow classification)
-- ✅ High-level `SwmmReport` interface with typed properties
-- ✅ Context manager support
-- ✅ 12 new tests (40 total tests passing)
-
-### Previous - Input File Parser
-- ✅ Refactored to encode/decode pattern
-- ✅ Added high-level `SwmmInput` interface
-- ✅ Multi-format support (JSON, Parquet)
-- ✅ Comprehensive test suite
-
 ## Contact
 
 For questions or issues, please open a GitHub issue.
-
----
-
-**Status**: ✅ Production-ready
-- **Input Files**: Full encode/decode support for SWMM 5.2.4
-- **Report Files**: Comprehensive parsing for SWMM 5.2+ reports

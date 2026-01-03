@@ -3,11 +3,11 @@ from setuptools import setup, find_packages
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
     # Extract description from first non-header line
-    lines = long_description.split('\n')
+    lines = long_description.split("\n")
     description = None
     for line in lines:
         line = line.strip()
-        if line and not line.startswith('#'):
+        if line and not line.startswith("#"):
             description = line
             break
 
@@ -36,6 +36,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
+        "pandas>=1.0.0",
         "pyarrow>=10.0.0",
     ],
     extras_require={

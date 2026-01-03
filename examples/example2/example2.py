@@ -51,7 +51,7 @@ def main():
 
         # Output to JSON
         print(f"\n💾 Saving to JSON format")
-        json_output = output_dir / "example2.json"
+        json_output = output_dir / "example2.inp.json"
         inp.to_json(json_output, pretty=True)
 
         if json_output.exists():
@@ -61,7 +61,7 @@ def main():
 
         # Output to Parquet (multi-file mode)
         print(f"\n💾 Saving to Parquet format (multi-file)")
-        parquet_dir = output_dir / "example2_parquet"
+        parquet_dir = output_dir / "example2.inp_parquet"
         inp.to_parquet(parquet_dir, single_file=False)
 
         if parquet_dir.exists():
@@ -73,7 +73,7 @@ def main():
 
         # Output to Parquet (single-file mode)
         print(f"\n💾 Saving to Parquet format (single-file)")
-        parquet_file = output_dir / "example2.parquet"
+        parquet_file = output_dir / "example2.inp.parquet"
         inp.to_parquet(parquet_file, single_file=True)
 
         if parquet_file.exists():
@@ -164,6 +164,39 @@ def main():
             print(f"      - Pollutants: {summary['n_pollutants']}")
             if summary["pollutants"]:
                 print(f"      - Pollutant List: {', '.join(summary['pollutants'])}")
+
+            # Export output to JSON
+            print(f"\n   💾 Saving output metadata to JSON format")
+            out_json = output_dir / "example2.out.json"
+            out.to_json(out_json, pretty=True)
+            if out_json.exists():
+                size = out_json.stat().st_size
+                print(f"      ✓ Saved: {out_json.name} ({size:,} bytes)")
+
+            # Export output to Parquet (single file)
+            print(f"\n   💾 Saving output metadata to Parquet format (single-file)")
+            out_parquet = output_dir / "example2.out.parquet"
+            try:
+                out.to_parquet(out_parquet, single_file=True)
+                if out_parquet.exists():
+                    size = out_parquet.stat().st_size
+                    print(f"      ✓ Saved: {out_parquet.name} ({size:,} bytes)")
+            except ImportError:
+                print(f"      ⚠ pandas/pyarrow not installed, skipping Parquet export")
+
+            # Export output to Parquet (multi-file)
+            print(f"\n   💾 Saving output metadata to Parquet format (multi-file)")
+            out_parquet_dir = output_dir / "example2.out_parquet"
+            try:
+                out.to_parquet(out_parquet_dir, single_file=False)
+                if out_parquet_dir.exists():
+                    parquet_files = list(out_parquet_dir.glob("*.parquet"))
+                    total_size = sum(f.stat().st_size for f in parquet_files)
+                    print(f"      ✓ Saved: {out_parquet_dir.name}/")
+                    print(f"      ✓ Files created: {len(parquet_files)}")
+                    print(f"      ✓ Total size: {total_size:,} bytes")
+            except ImportError:
+                print(f"      ⚠ pandas/pyarrow not installed, skipping Parquet export")
 
         except Exception as e:
             print(f"   ✗ Failed to parse output file: {e}")

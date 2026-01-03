@@ -7,7 +7,7 @@ The .out files contain time series results from SWMM simulations including flows
 
 import struct
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from datetime import datetime, timedelta
 
 
@@ -64,7 +64,7 @@ class SwmmOutputDecoder:
         f.seek(0)
         magic_start = self._read_int(f)
         if magic_start != self._MAGIC_NUMBER:
-            raise ValueError(f"Invalid .out file: magic number mismatch at start")
+            raise ValueError("Invalid .out file: magic number mismatch at start")
 
         # Read version and flow unit info
         swmm_version = self._read_int(f)
