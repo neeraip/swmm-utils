@@ -2,6 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # Parquet support
+pandas>=1.0.0
 pyarrow>=10.0.0
 
 # Development dependencies

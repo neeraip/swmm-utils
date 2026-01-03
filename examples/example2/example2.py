@@ -145,6 +145,7 @@ def main():
     if output_file.exists():
         print(f"\n💾 Parsing SWMM output file")
         try:
+            # Approach 1: Load metadata only (default behavior, fast and lightweight)
             out = SwmmOutput(output_file)
             print(f"   ✓ Successfully parsed!")
             print(f"   ✓ SWMM Version: {out.version}")
@@ -165,13 +166,33 @@ def main():
             if summary["pollutants"]:
                 print(f"      - Pollutant List: {', '.join(summary['pollutants'])}")
 
-            # Export output to JSON
+            # Export output to JSON (metadata only)
             print(f"\n   💾 Saving output metadata to JSON format")
             out_json = output_dir / "example2.out.json"
             out.to_json(out_json, pretty=True)
             if out_json.exists():
                 size = out_json.stat().st_size
                 print(f"      ✓ Saved: {out_json.name} ({size:,} bytes)")
+
+            # Approach 2: Load with full time series data (for comprehensive analysis)
+            print(f"\n   💾 Loading output file with full time series data")
+            out_with_ts = SwmmOutput(output_file, load_time_series=True)
+            print(
+                f"      ✓ Loaded with time series data from {out_with_ts.n_periods} time steps"
+            )
+
+            # Export output to JSON (with full time series)
+            print(f"\n   💾 Saving output with full time series to JSON format")
+            out_json_ts = output_dir / "example2.out_with_timeseries.json"
+            out_with_ts.to_json(out_json_ts, pretty=True)
+            if out_json_ts.exists():
+                size_ts = out_json_ts.stat().st_size
+                print(f"      ✓ Saved: {out_json_ts.name} ({size_ts:,} bytes)")
+                if out_json.exists():
+                    ratio = size_ts / size
+                    print(
+                        f"      ℹ️  Size comparison: {ratio:.1f}x larger than metadata-only export"
+                    )
 
             # Export output to Parquet (single file)
             print(f"\n   💾 Saving output metadata to Parquet format (single-file)")

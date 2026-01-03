@@ -27,15 +27,20 @@ class SwmmOutputDecoder:
         """Initialize the output file decoder."""
         pass
 
-    def decode_file(self, filepath: str | Path) -> Dict[str, Any]:
+    def decode_file(
+        self, filepath: str | Path, include_time_series: bool = False
+    ) -> Dict[str, Any]:
         """
         Decode a SWMM output (.out) binary file.
 
         Args:
             filepath: Path to the .out file
+            include_time_series: Whether to read and include time series data (default False)
+                               Setting to True reads all time series records which can be memory-intensive
+                               for large simulations
 
         Returns:
-            Dictionary containing parsed output data with metadata and time index
+            Dictionary containing parsed output data with metadata, time index, and optionally time series data
         """
         filepath = Path(filepath)
 
@@ -51,10 +56,18 @@ class SwmmOutputDecoder:
                 metadata["n_periods"],
             )
 
+            # Optionally read time series data
+            time_series = None
+            if include_time_series:
+                time_series = self._read_time_series_data(
+                    f, header, metadata, time_index
+                )
+
             return {
                 "header": header,
                 "metadata": metadata,
                 "time_index": time_index,
+                "time_series": time_series,
                 "filepath": str(filepath),
             }
 
@@ -92,6 +105,113 @@ class SwmmOutputDecoder:
             "n_links": n_links,
             "n_pollutants": n_pollutants,
         }
+
+    def _read_time_series_data(
+        self,
+        f,
+        header: Dict[str, Any],
+        metadata: Dict[str, Any],
+        time_index: List[datetime],
+    ) -> Dict[str, Any]:
+        """
+        Read time series data records from the binary file.
+
+        This method reads all the 4-byte record values for each time step.
+        Returns organized by element type and time step.
+
+        Args:
+            f: File handle positioned after metadata
+            header: Parsed header information
+            metadata: Parsed metadata information
+            time_index: List of timestamps
+
+        Returns:
+            Dictionary with time series data organized by element type
+        """
+        n_subcatch = header["n_subcatchments"]
+        n_nodes = header["n_nodes"]
+        n_links = header["n_links"]
+        n_periods = metadata["n_periods"]
+
+        n_subcatch_vars = metadata["variables"]["subcatchment"]
+        n_node_vars = metadata["variables"]["node"]
+        n_link_vars = metadata["variables"]["link"]
+        n_system_vars = metadata["variables"]["system"]
+
+        # Calculate total record size in bytes
+        record_size = (
+            n_subcatch * n_subcatch_vars
+            + n_nodes * n_node_vars
+            + n_links * n_link_vars
+            + n_system_vars
+        ) * 4
+
+        # Find the start of time series data
+        # It's after the metadata section, which we've already read past
+        current_pos = f.tell()
+
+        # Initialize storage for time series
+        time_series = {
+            "subcatchments": {},
+            "nodes": {},
+            "links": {},
+            "system": [],
+        }
+
+        # Initialize nested structures for each element
+        for subcatch_label in metadata["labels"]["subcatchment"]:
+            time_series["subcatchments"][subcatch_label] = []
+
+        for node_label in metadata["labels"]["node"]:
+            time_series["nodes"][node_label] = []
+
+        for link_label in metadata["labels"]["link"]:
+            time_series["links"][link_label] = []
+
+        # Read all time step records
+        for period in range(n_periods):
+            f.seek(current_pos + period * record_size)
+
+            # Read subcatchment data
+            for i, subcatch_label in enumerate(metadata["labels"]["subcatchment"]):
+                values = [self._read_float(f) for _ in range(n_subcatch_vars)]
+                time_series["subcatchments"][subcatch_label].append(
+                    {
+                        "timestamp": time_index[period].isoformat(),
+                        "values": values,
+                    }
+                )
+
+            # Read node data
+            for i, node_label in enumerate(metadata["labels"]["node"]):
+                values = [self._read_float(f) for _ in range(n_node_vars)]
+                time_series["nodes"][node_label].append(
+                    {
+                        "timestamp": time_index[period].isoformat(),
+                        "values": values,
+                    }
+                )
+
+            # Read link data
+            for i, link_label in enumerate(metadata["labels"]["link"]):
+                values = [self._read_float(f) for _ in range(n_link_vars)]
+                time_series["links"][link_label].append(
+                    {
+                        "timestamp": time_index[period].isoformat(),
+                        "values": values,
+                    }
+                )
+
+            # Read system data
+            system_values = [self._read_float(f) for _ in range(n_system_vars)]
+            time_series["system"].append(
+                {
+                    "timestamp": time_index[period].isoformat(),
+                    "values": system_values,
+                }
+            )
+
+        return time_series
 
     def _parse_metadata(self, f, header: Dict[str, Any]) -> Dict[str, Any]:
         """Parse metadata section (labels, properties, etc.)."""

@@ -517,37 +517,71 @@ print(output.properties)               # All accessible properties
 
 ### JSON Export
 
-Convert output file data to JSON format for compatibility with other tools:
+Convert output file data to JSON format for compatibility with other tools. You control what gets loaded at initialization with the `load_time_series` parameter:
 
 ```python
-# Export with pretty printing (human-readable)
-output.to_json("output.json", pretty=True)
+from swmm_utils import SwmmOutput
 
-# Output size: ~4-10 KB for typical models
-# Contains: All metadata and summary statistics
+# Option 1: Load metadata only (default, fast, small file)
+output = SwmmOutput("simulation.out")
+output.to_json("output.json", pretty=True)
+# Output size: ~4-10 KB
+# Export speed: <100ms
+
+# Option 2: Load with full time series data (comprehensive analysis)
+output = SwmmOutput("simulation.out", load_time_series=True)
+output.to_json("output_full.json", pretty=True)
+# Output size: 100-1000x larger (can be 10-100+ MB)
+# Export speed: 0.1-5 seconds (proportional to time steps)
 ```
 
-**JSON Structure**:
+**Key API Point**: The `load_time_series` parameter is specified at **initialization**, not at export time. This gives you explicit control over when data is loaded and avoids hidden I/O operations during export.
+
+**Metadata Only Export** (default, `load_time_series=False`):
+- Contains: Header, metadata, labels, properties, summary
+- Size: ~4-10 KB
+- Speed: <100ms
+- Best for: Quick inspection, metadata queries, web/API usage
+- Example: `output = SwmmOutput("file.out")`
+
+**Full Export with Time Series** (`load_time_series=True`):
+- Contains: Everything above + all time step values for every element
+- Size: 100-1000x larger (can be 10-100+ MB)
+- Speed: 0.1-5 seconds (depends on simulation length)
+- Best for: Complete data analysis, archival, external tools, data science
+- Example: `output = SwmmOutput("file.out", load_time_series=True)`
+- Trade-off: Larger files but complete simulation data
+
+**JSON Structure with Time Series**:
 ```json
 {
-  "version": "5.2.0",
-  "flow_unit": "CFS",
-  "start_date": "2020-01-01",
-  "start_time": "00:00:00",
-  "end_date": "2020-01-05",
-  "end_time": "23:00:00",
-  "report_interval": "1:00:00",
-  "n_periods": 120,
-  "n_subcatch": 15,
-  "n_nodes": 28,
-  "n_links": 32,
-  "n_pollutants": 2,
-  "subcatchment_labels": ["S1", "S2", ...],
-  "node_labels": ["J1", "J2", ...],
-  "link_labels": ["C1", "C2", ...],
-  "pollutant_labels": ["TSS", "BOD"],
-  "pollutant_units": ["mg/L", "mg/L"]
+  "header": {...},
+  "metadata": {...},
+  "summary": {...},
+  "time_series": {
+    "nodes": {
+      "J1": [{"timestamp": "...", "values": [...]}, ...],
+      "J2": [...]
+    },
+    "links": {...},
+    "subcatchments": {...},
+    "system": [...]
+  }
 }
+```
+
+**Conditional Loading Example**:
+```python
+from pathlib import Path
+
+out_file = Path("simulation.out")
+file_size = out_file.stat().st_size
+
+# Only load time series for smaller files
+load_ts = file_size < 10_000_000  # < 10 MB
+
+output = SwmmOutput(out_file, load_time_series=load_ts)
+output.to_json("output.json")
 ```
 
 ### Parquet Export (Single-File Mode)
@@ -581,13 +615,12 @@ output.to_parquet("output_parquet/", single_file=False)
 
 ## Common Usage Patterns
 
-### Loading and Inspecting an Output File
+### Loading and Inspecting an Output File (Metadata Only)
 
 ```python
 from swmm_utils import SwmmOutput
-import pandas as pd
 
-# Load output file
+# Load output file - metadata only by default (fast, lightweight)
 output = SwmmOutput("simulation.out")
 
 # Basic information
@@ -595,9 +628,27 @@ print(f"Simulation: {output.start_date} to {output.end_date}")
 print(f"Elements: {output.n_nodes} nodes, {output.n_links} links")
 print(f"Time steps: {output.n_periods}")
 
-# Export for analysis
-output.to_json("output.json", pretty=True)
+# Export for quick analysis
+output.to_json("output.json", pretty=True)           # Small file (~4 KB)
 output.to_parquet("output.parquet", single_file=True)
+```
+
+### Complete Analysis with Time Series Data
+
+```python
+from swmm_utils import SwmmOutput
+
+# Load with full time series data - specify at initialization
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Now you have access to all timestep values
+print(f"Elements: {output.n_nodes} nodes, {output.n_links} links")
+print(f"Time steps: {output.n_periods}")
+
+# Export complete data for external analysis
+output.to_json("output_complete.json", pretty=True)  # Large file (~500x)
+
+# The JSON now includes time_series data for nodes, links, subcatchments, system
 ```
 
 ### Finding Peak Conditions

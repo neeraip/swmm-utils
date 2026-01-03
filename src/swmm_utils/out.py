@@ -15,18 +15,25 @@ from .out_decoder import SwmmOutputDecoder
 class SwmmOutput:
     """High-level interface for SWMM output (.out) files."""
 
-    def __init__(self, filepath: str | Path):
+    def __init__(self, filepath: str | Path, load_time_series: bool = False):
         """
         Initialize SWMM output file reader.
 
         Args:
             filepath: Path to the .out file
+            load_time_series: If True, loads all time series data into memory.
+                            This enables to_json() to include all timestep data,
+                            but requires more memory and processing time.
+                            Default is False (only metadata loaded).
         """
         self.filepath = Path(filepath)
         self.decoder = SwmmOutputDecoder()
+        self.load_time_series = load_time_series
 
-        # Decode the file
-        self._data = self.decoder.decode_file(self.filepath)
+        # Decode the file with specified settings
+        self._data = self.decoder.decode_file(
+            self.filepath, include_time_series=load_time_series
+        )
 
     @property
     def version(self) -> str:
@@ -184,9 +191,17 @@ class SwmmOutput:
             "pollutants": self.pollutant_labels,
         }
 
-    def to_json(self, filepath: str | Path, pretty: bool = True) -> None:
+    def to_json(
+        self,
+        filepath: str | Path,
+        pretty: bool = True,
+    ) -> None:
         """
-        Export output file metadata to JSON format.
+        Export output file data to JSON format.
+
+        Exports all data that was loaded during initialization.
+        If initialized with load_time_series=False (default), exports only metadata.
+        If initialized with load_time_series=True, exports metadata and all time series data.
 
         Args:
             filepath: Path where JSON file will be saved
@@ -210,6 +225,10 @@ class SwmmOutput:
             },
             "summary": self.summary(),
         }
+
+        # Add time series if it was loaded
+        if self._data.get("time_series") is not None:
+            output_data["time_series"] = self._data["time_series"]
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(
