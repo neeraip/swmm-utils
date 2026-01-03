@@ -6,11 +6,13 @@ This example demonstrates:
 2. Running the SWMM simulation engine
 3. Outputting to JSON format
 4. Outputting to Parquet format (both single-file and multi-file modes)
+5. Parsing the SWMM report (.rpt) file
+6. Parsing the SWMM output (.out) binary file
 """
 
 import subprocess
 from pathlib import Path
-from swmm_utils import SwmmInput, SwmmReport
+from swmm_utils import SwmmInput, SwmmReport, SwmmOutput
 
 
 def main():
@@ -138,6 +140,33 @@ def main():
                     print(
                         f"      {link['name']}: {link['maximum_flow']:.2f} CFS max flow, {link['maximum_velocity']:.2f} ft/s max velocity"
                     )
+
+    # Parse output file
+    if output_file.exists():
+        print(f"\n💾 Parsing SWMM output file")
+        try:
+            out = SwmmOutput(output_file)
+            print(f"   ✓ Successfully parsed!")
+            print(f"   ✓ SWMM Version: {out.version}")
+            print(f"   ✓ Flow Unit: {out.flow_unit}")
+            print(
+                f"   ✓ Simulation Period: {out.start_date.strftime('%Y-%m-%d %H:%M:%S')} to {out.end_date.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            print(f"   ✓ Report Interval: {out.report_interval}")
+            print(f"   ✓ Time Steps: {out.n_periods}")
+
+            # Show model summary
+            summary = out.summary()
+            print(f"\n   📋 Model Summary:")
+            print(f"      - Subcatchments: {summary['n_subcatchments']}")
+            print(f"      - Nodes: {summary['n_nodes']}")
+            print(f"      - Links: {summary['n_links']}")
+            print(f"      - Pollutants: {summary['n_pollutants']}")
+            if summary["pollutants"]:
+                print(f"      - Pollutant List: {', '.join(summary['pollutants'])}")
+
+        except Exception as e:
+            print(f"   ✗ Failed to parse output file: {e}")
 
     # Summary
     print(f"\n" + "=" * 80)
