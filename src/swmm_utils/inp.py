@@ -85,7 +85,8 @@ class SwmmInput:
 
         Args:
             output_path: Path to output file or directory
-            single_file: If True, save as single file; if False, save as directory with one file per section
+            single_file: If True, save as single file; if False, save as directory
+                         with one file per section
         """
         self._encoder.encode_to_parquet(
             self._data, str(output_path), single_file=single_file
@@ -304,4 +305,5 @@ class SwmmInput:
     def __repr__(self) -> str:
         """String representation."""
         sections = list(self._data.keys())
-        return f"SwmmInput(sections={len(sections)}, keys={sections[:5]}{'...' if len(sections) > 5 else ''})"
+        suffix = "..." if len(sections) > 5 else ""
+        return f"SwmmInput(sections={len(sections)}, keys={sections[:5]}{suffix})"

@@ -252,20 +252,22 @@ class SwmmOutput:
         """
         try:
             import pandas as pd
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "pandas is required for Parquet export. Install with: pip install pandas"
-            )
+            ) from exc
 
         try:
-            import pyarrow  # noqa: F401
-        except ImportError:
+            import pyarrow  # pylint: disable=unused-import # noqa: F401
+        except ImportError as exc:
             raise ImportError(
                 "pyarrow is required for Parquet export. Install with: pip install pyarrow"
-            )
+            ) from exc
 
         if single_file:
             # Export all metadata as a single parquet file
+            if filepath is None:
+                raise ValueError("filepath is required when single_file=True")
             filepath = Path(filepath)
             filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -280,9 +282,10 @@ class SwmmOutput:
 
             df = pd.DataFrame(summary_data)
             df.to_parquet(filepath, index=False)
-
         else:
             # Export as multiple parquet files in a directory
+            if filepath is None:
+                raise ValueError("filepath is required when single_file=False")
             dirpath = Path(filepath)
             dirpath.mkdir(parents=True, exist_ok=True)
 

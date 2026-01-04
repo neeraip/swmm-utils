@@ -8,34 +8,30 @@ from pathlib import Path
 class SwmmInputEncoder:
     """Encode SWMM model dicts into .inp, .json, or .parquet file formats."""
 
-    def __init__(self):
-        """Initialize the encoder."""
-        pass
-
     def encode_to_file(
-        self, model: Dict[str, Any], filepath: str, format: Optional[str] = None
+        self, model: Dict[str, Any], filepath: str, file_format: Optional[str] = None
     ):
         """Encode a SWMM model to a file.
 
         Args:
             model: SWMM model dict
             filepath: Output file path
-            format: Output format ('inp', 'json', 'parquet'). If None, inferred from filepath extension.
+            file_format: Output format ('inp', 'json', 'parquet'). If None, inferred from filepath extension.
         """
-        if format is None:
+        if file_format is None:
             # Infer format from file extension
             ext = Path(filepath).suffix.lower()
             format_map = {".inp": "inp", ".json": "json", ".parquet": "parquet"}
-            format = format_map.get(ext, "inp")
+            file_format = format_map.get(ext, "inp")
 
-        if format == "inp":
+        if file_format == "inp":
             self.encode_to_inp_file(model, filepath)
-        elif format == "json":
+        elif file_format == "json":
             self.encode_to_json(model, filepath, pretty=True)
-        elif format == "parquet":
+        elif file_format == "parquet":
             self.encode_to_parquet(model, filepath)
         else:
-            raise ValueError(f"Unsupported format: {format}")
+            raise ValueError(f"Unsupported format: {file_format}")
 
     def encode_to_inp_file(self, model: Dict[str, Any], filepath: str):
         """Encode a SWMM model to a .inp file.
@@ -119,17 +115,20 @@ class SwmmInputEncoder:
 
         Args:
             model: SWMM model dict
-            output_path: Output file path (if single_file=True) or directory path (if single_file=False)
-            single_file: If True, write all data to a single parquet file with section metadata.
-                        If False, write one parquet file per section in a directory.
+            output_path: Output file path (if single_file=True) or directory path
+                         (if single_file=False)
+            single_file: If True, write all data to a single parquet file with
+                         section metadata. If False, write one parquet file per section
+                         in a directory.
         """
         try:
             import pyarrow as pa
             import pyarrow.parquet as pq
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
-                "pyarrow is required for Parquet support. Install with: pip install pyarrow"
-            )
+                "pyarrow is required for Parquet support. "
+                "Install with: pip install pyarrow"
+            ) from exc
 
         if single_file:
             # Single file mode: store all sections in one file with section_name column
@@ -266,7 +265,7 @@ class SwmmInputEncoder:
         if "evaporation" in model and model["evaporation"]:
             self._write_section_header(file, "EVAPORATION")
             evap = model["evaporation"]
-            file.write(f";;Type       Parameters\n")
+            file.write(";;Type       Parameters\n")
 
             values = " ".join(evap.get("values", []))
             file.write(f"{evap.get('type', 'CONSTANT'):<12} {values}\n")

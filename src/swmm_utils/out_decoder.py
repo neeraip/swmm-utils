@@ -1,8 +1,9 @@
 """
 SWMM Output File Decoder
 
-This module provides functionality to decode SWMM .out (binary output) files into structured data.
-The .out files contain time series results from SWMM simulations including flows, depths, volumes, etc.
+This module provides functionality to decode SWMM .out (binary output) files
+into structured data. The .out files contain time series results from SWMM
+simulations including flows, depths, volumes, etc.
 """
 
 import struct
@@ -23,10 +24,6 @@ class SwmmOutputDecoder:
     _LINK_TYPES = ["CONDUIT", "PUMP", "ORIFICE", "WEIR", "OUTLET"]
     _PROPERTY_LABELS = ["type", "area", "invert", "max_depth", "offset", "length"]
 
-    def __init__(self):
-        """Initialize the output file decoder."""
-        pass
-
     def decode_file(
         self, filepath: str | Path, include_time_series: bool = False
     ) -> Dict[str, Any]:
@@ -40,7 +37,8 @@ class SwmmOutputDecoder:
                                for large simulations
 
         Returns:
-            Dictionary containing parsed output data with metadata, time index, and optionally time series data
+            Dictionary containing parsed output data with metadata, time index, and
+            optionally time series data
         """
         filepath = Path(filepath)
 
@@ -173,7 +171,7 @@ class SwmmOutputDecoder:
             f.seek(current_pos + period * record_size)
 
             # Read subcatchment data
-            for i, subcatch_label in enumerate(metadata["labels"]["subcatchment"]):
+            for subcatch_label in metadata["labels"]["subcatchment"]:
                 values = [self._read_float(f) for _ in range(n_subcatch_vars)]
                 time_series["subcatchments"][subcatch_label].append(
                     {
@@ -183,7 +181,7 @@ class SwmmOutputDecoder:
                 )
 
             # Read node data
-            for i, node_label in enumerate(metadata["labels"]["node"]):
+            for node_label in metadata["labels"]["node"]:
                 values = [self._read_float(f) for _ in range(n_node_vars)]
                 time_series["nodes"][node_label].append(
                     {
@@ -193,7 +191,7 @@ class SwmmOutputDecoder:
                 )
 
             # Read link data
-            for i, link_label in enumerate(metadata["labels"]["link"]):
+            for link_label in metadata["labels"]["link"]:
                 values = [self._read_float(f) for _ in range(n_link_vars)]
                 time_series["links"][link_label].append(
                     {
@@ -277,7 +275,7 @@ class SwmmOutputDecoder:
         }
 
     def _read_object_properties(
-        self, f, n_objects: int, obj_type: str, labels: List[str]
+        self, f, _n_objects: int, obj_type: str, labels: List[str]
     ) -> Dict[str, Dict[str, Any]]:
         """Read properties for objects (type, area, invert, max_depth, etc.)."""
         properties = {}

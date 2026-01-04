@@ -60,7 +60,7 @@ class SwmmReport:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
-        pass
+        return False
 
     @property
     def header(self) -> Dict[str, str]:

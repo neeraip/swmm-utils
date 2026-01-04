@@ -1,0 +1,21 @@
+[MASTER]
+# Ignore these directories
+ignore-patterns=test_.*?py
+
+[MESSAGES CONTROL]
+# Disable warnings that are too strict for this codebase
+disable=
+    import-outside-toplevel,         # OK for optional dependencies
+    too-many-public-methods,         # Classes naturally have many methods
+    too-many-locals,                 # Some complex functions need variables
+    too-many-branches,               # Some parsing logic requires branching
+    too-many-statements,             # Some methods are inherently complex
+    too-few-public-methods,          # Not all classes need many methods
+    duplicate-code,                  # Acceptable for similar error handling
+    line-too-long,                   # Let black handle line length
+    too-many-boolean-expressions,    # Complex conditions are necessary
+
+[FORMAT]
+# Line length
+max-line-length=100
+

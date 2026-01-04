@@ -12,10 +12,6 @@ from typing import Dict, Any, List, Optional
 class SwmmReportDecoder:
     """Decoder for SWMM report (.rpt) files."""
 
-    def __init__(self):
-        """Initialize the SWMM report decoder."""
-        pass
-
     def decode_file(self, filepath: str | Path) -> Dict[str, Any]:
         """
         Decode a SWMM report file.

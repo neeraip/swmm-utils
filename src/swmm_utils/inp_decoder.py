@@ -54,12 +54,10 @@ class SwmmInputDecoder:
             if path.exists() and path.is_file():
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
-            else:
-                # Parse as JSON string
-                return json.loads(json_input)
-        else:
-            # Assume file object
-            return json.load(json_input)
+            # Parse as JSON string
+            return json.loads(json_input)
+        # Assume file object
+        return json.load(json_input)
 
     def decode_parquet(self, path: str) -> Dict[str, Any]:
         """Decode SWMM model from Parquet format.
@@ -73,10 +71,11 @@ class SwmmInputDecoder:
         """
         try:
             import pyarrow.parquet as pq
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
-                "pyarrow is required for Parquet support. Install with: pip install pyarrow"
-            )
+                "pyarrow is required for Parquet support. "
+                "Install with: pip install pyarrow"
+            ) from exc
 
         file_path = Path(path)
 
