@@ -150,10 +150,10 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Element lookup by name
 
 ### Testing
-- ✅ Comprehensive test suite (67 tests passing)
+- ✅ Comprehensive test suite (69 tests passing)
 - ✅ Input file tests (28 tests)
 - ✅ Report file tests (12 tests)
-- ✅ Output file tests (27 tests)
+- ✅ Output file tests (29 tests)
 
 ## Supported SWMM Sections
 
@@ -383,9 +383,6 @@ with SwmmReport("lid_scenario.rpt") as report:
             print(f"{sub}: {reduction:.1f}% runoff reduction via infiltration")
 ```
 
-### Example 7: Batch Processing
-
-```python
 ### Example 7: Round-Trip Conversion
 
 ```python
