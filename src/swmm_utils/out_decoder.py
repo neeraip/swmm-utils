@@ -8,7 +8,7 @@ simulations including flows, depths, volumes, etc.
 
 import struct
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 from datetime import datetime, timedelta
 
 
@@ -25,7 +25,7 @@ class SwmmOutputDecoder:
     _PROPERTY_LABELS = ["type", "area", "invert", "max_depth", "offset", "length"]
 
     def decode_file(
-        self, filepath: str | Path, include_time_series: bool = False
+        self, filepath: Union[str, Path], include_time_series: bool = False
     ) -> Dict[str, Any]:
         """
         Decode a SWMM output (.out) binary file.

@@ -6,7 +6,7 @@ This module provides a high-level interface for accessing SWMM output file data.
 
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timedelta
 
 from .out_decoder import SwmmOutputDecoder
@@ -15,7 +15,9 @@ from .out_decoder import SwmmOutputDecoder
 class SwmmOutput:
     """High-level interface for SWMM output (.out) files."""
 
-    def __init__(self, filepath: str | Path, load_time_series: bool = False):
+    def __init__(
+        self, filepath: Union[str, Path], load_time_series: bool = False
+    ):
         """
         Initialize SWMM output file reader.
 
@@ -193,7 +195,7 @@ class SwmmOutput:
 
     def to_json(
         self,
-        filepath: str | Path,
+        filepath: Union[str, Path],
         pretty: bool = True,
     ) -> None:
         """
@@ -239,7 +241,7 @@ class SwmmOutput:
             )
 
     def to_parquet(
-        self, filepath: str | Path | None = None, single_file: bool = True
+        self, filepath: Union[str, Path, None] = None, single_file: bool = True
     ) -> None:
         """
         Export output file metadata to Parquet format.

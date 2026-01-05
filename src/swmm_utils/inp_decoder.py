@@ -106,7 +106,7 @@ class SwmmInputDecoder:
 
             return model
 
-        elif file_path.is_dir():
+        if file_path.is_dir():
             # Multi-file mode: read each parquet file as a section
             model = {}
 
@@ -124,8 +124,7 @@ class SwmmInputDecoder:
 
             return model
 
-        else:
-            raise FileNotFoundError(f"Path not found: {path}")
+        raise FileNotFoundError(f"Path not found: {path}")
 
     # Backwards compatibility aliases
     def parse_file(self, filepath: str) -> Dict[str, Any]:
@@ -209,8 +208,8 @@ class SwmmInputDecoder:
         handler_name = f"_parse_{section.lower()}"
         handler = getattr(self, handler_name, None)
 
-        if handler:
-            handler(model, data)
+        if handler is not None:
+            handler(model, data)  # type: ignore
         else:
             print(f"Warning: No handler for section [{section}]")
 
@@ -738,7 +737,7 @@ class SwmmInputDecoder:
         for line in data:
             parts = line.split()
             if len(parts) >= 3:
-                entry = {
+                entry: Dict[str, Any] = {
                     "node": parts[0],
                     "constituent": parts[1],
                     "baseline": parts[2],

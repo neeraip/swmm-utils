@@ -5,7 +5,7 @@ This module provides a high-level interface for working with SWMM report (.rpt) 
 """
 
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 
 from .rpt_decoder import SwmmReportDecoder
 
@@ -24,7 +24,7 @@ class SwmmReport:
         ...         print(f"{node['name']}: {node['maximum_depth']} ft")
     """
 
-    def __init__(self, filepath: Optional[str | Path] = None):
+    def __init__(self, filepath: Optional[Union[str, Path]] = None):
         """
         Initialize SwmmReport.
 
@@ -37,7 +37,7 @@ class SwmmReport:
         if filepath:
             self.load(filepath)
 
-    def load(self, filepath: str | Path) -> None:
+    def load(self, filepath: Union[str, Path]) -> None:
         """
         Load a SWMM report file.
 

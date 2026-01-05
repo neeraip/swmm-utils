@@ -6,13 +6,13 @@ This module provides functionality to decode SWMM .rpt (report) files into struc
 
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 
 
 class SwmmReportDecoder:
     """Decoder for SWMM report (.rpt) files."""
 
-    def decode_file(self, filepath: str | Path) -> Dict[str, Any]:
+    def decode_file(self, filepath: Union[str, Path]) -> Dict[str, Any]:
         """
         Decode a SWMM report file.
 
