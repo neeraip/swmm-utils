@@ -210,7 +210,7 @@ class SwmmOutput:
             filepath: Path where JSON file will be saved
             pretty: Whether to pretty-print JSON (default True)
         """
-        self.encoder.encode_to_json(self, filepath, pretty=pretty)
+        self.encoder.encode_to_json(self._data, filepath, pretty=pretty, summary_func=self.summary)
 
     def to_parquet(
         self, filepath: Union[str, Path, None] = None, single_file: bool = True
@@ -224,4 +224,4 @@ class SwmmOutput:
             single_file: Whether to save as single file (True) or multiple files (False).
                         If False, creates separate parquet files for each data type.
         """
-        self.encoder.encode_to_parquet(self, filepath, single_file=single_file)
+        self.encoder.encode_to_parquet(self._data, filepath, single_file=single_file, summary_func=self.summary)
