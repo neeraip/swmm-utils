@@ -227,3 +227,45 @@ class SwmmOutput:
         self.encoder.encode_to_parquet(
             self._data, filepath, single_file=single_file, summary_func=self.summary
         )
+
+    def to_dataframe(
+        self,
+        element_type: Optional[str] = None,
+        element_name: Optional[str] = None,
+    ):
+        """
+        Export to Pandas DataFrame(s).
+
+        Three levels of export:
+        - Full export: Returns dict with metadata and all time series sections
+        - Section export: Returns MultiIndex DataFrame for nodes/links/subcatchments
+        - Single element: Returns single element time series as DataFrame
+
+        Args:
+            element_type: 'nodes', 'links', or 'subcatchments'. If None, exports all.
+            element_name: Specific element name (requires element_type). If None, exports all elements in section.
+
+        Returns:
+            - If no args: Dict with 'metadata', 'nodes', 'links', 'subcatchments' keys
+            - If element_type only: MultiIndex DataFrame (timestamp, element_name)
+            - If both args: Single element DataFrame with timestamp index
+
+        Example:
+            # Full export
+            all_data = output.to_dataframe()
+            metadata_df = all_data['metadata']
+            nodes_df = all_data['nodes']
+
+            # Section export
+            nodes_df = output.to_dataframe('nodes')
+            nodes_df.loc['2024-01-01']  # All nodes at that timestamp
+
+            # Single element
+            j1_df = output.to_dataframe('nodes', 'J1')
+            j1_df['depth'].plot()  # Plot time series
+        """
+        return self.encoder.encode_to_dataframe(
+            self._data,
+            element_type=element_type,
+            element_name=element_name,
+        )

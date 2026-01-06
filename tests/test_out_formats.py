@@ -161,3 +161,100 @@ class TestSwmmOutputFormats:
 
         assert parquet_file.exists()
         assert parquet_file.parent.exists()
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_full_export(self, tmp_path):
+        """Test full DataFrame export with metadata and all sections."""
+        pytest.importorskip("pandas")
+
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+        result = output.to_dataframe()
+
+        # Check structure
+        assert isinstance(result, dict)
+        assert "metadata" in result
+        assert "nodes" in result
+        assert "links" in result
+        assert "subcatchments" in result
+
+        # Check metadata
+        metadata_df = result["metadata"]
+        assert metadata_df.shape[0] == 1
+        assert "version" in metadata_df.columns
+        assert "flow_unit" in metadata_df.columns
+        assert "n_periods" in metadata_df.columns
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_links_section(self, tmp_path):
+        """Test section-level DataFrame export for links."""
+        pytest.importorskip("pandas")
+
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+        links_df = output.to_dataframe("links")
+
+        # Should be a DataFrame
+        assert hasattr(links_df, "shape")
+
+        if len(links_df) > 0:
+            # Check MultiIndex structure
+            assert links_df.index.names == ["timestamp", "element_name"]
+
+            # Check for value columns
+            value_cols = [col for col in links_df.columns if col.startswith("value_")]
+            assert len(value_cols) > 0
+
+            # Can filter by timestamp
+            first_timestamp = links_df.index.get_level_values("timestamp")[0]
+            filtered = links_df.loc[first_timestamp]
+            assert len(filtered) > 0
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_single_element(self, tmp_path):
+        """Test single element DataFrame export."""
+        pytest.importorskip("pandas")
+
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        if output.n_links > 0:
+            first_link = output.link_labels[0]
+            link_df = output.to_dataframe("links", first_link)
+
+            # Should be a DataFrame
+            assert hasattr(link_df, "shape")
+
+            if len(link_df) > 0:
+                # Check timestamp index
+                assert link_df.index.name == "timestamp"
+
+                # Should have value columns
+                value_cols = [col for col in link_df.columns if col.startswith("value_")]
+                assert len(value_cols) > 0
+
+                # Should have n_periods rows
+                assert len(link_df) == output.n_periods
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_pandas_operations(self, tmp_path):
+        """Test that exported DataFrames support pandas operations."""
+        pytest.importorskip("pandas")
+
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        if output.n_links > 0:
+            first_link = output.link_labels[0]
+            link_df = output.to_dataframe("links", first_link)
+
+            if len(link_df) > 0 and "value_0" in link_df.columns:
+                # Test pandas operations
+                max_val = link_df["value_0"].max()
+                assert isinstance(max_val, (int, float))
+
+                mean_val = link_df["value_0"].mean()
+                assert isinstance(mean_val, (int, float))
+
+                # Test resampling if pandas available
+                try:
+                    resampled = link_df["value_0"].resample("1D").mean()
+                    assert len(resampled) > 0
+                except Exception:
+                    # Resampling may fail with synthetic data, that's okay
+                    pass

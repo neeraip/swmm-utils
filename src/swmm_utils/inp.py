@@ -16,6 +16,15 @@ class SwmmInput:
             inp.to_inp("output.inp")
             inp.to_json("output.json")
 
+        # Export to Pandas DataFrames
+        with SwmmInput("model.inp") as inp:
+            # Export all sections as dictionary of dataframes
+            all_dfs = inp.to_dataframe()
+            junctions_df = all_dfs['junctions']
+            
+            # Export specific section
+            conduits_df = inp.to_dataframe('conduits')
+
         # Create new model
         with SwmmInput() as inp:
             inp.title = "New Model"

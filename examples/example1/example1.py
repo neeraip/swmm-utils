@@ -277,6 +277,52 @@ def main():
             except ImportError:
                 print("      ⚠ pandas/pyarrow not installed, skipping Parquet export")
 
+            # Export to Pandas DataFrames
+            print("\n   📊 Exporting time series data to Pandas DataFrames")
+            try:
+                # Full export with metadata and all sections
+                print("\n      Level 1: Full export (all sections + metadata)")
+                all_dfs = out_with_ts.to_dataframe()
+                print(f"      ✓ Returned dict with keys: {list(all_dfs.keys())}")
+                if "metadata" in all_dfs:
+                    meta_df = all_dfs["metadata"]
+                    print(
+                        f"      ✓ Metadata: {meta_df.shape[0]} row(s), {meta_df.shape[1]} column(s)"
+                    )
+                if "links" in all_dfs and len(all_dfs["links"]) > 0:
+                    links_df = all_dfs["links"]
+                    print(
+                        f"      ✓ Links: {links_df.shape[0]} row(s) ({out_with_ts.n_links} links × {out_with_ts.n_periods} periods)"
+                    )
+
+                # Section-level export (links only)
+                print("\n      Level 2: Section export (links only)")
+                links_section_df = out_with_ts.to_dataframe("links")
+                print(
+                    f"      ✓ Links section: {links_section_df.shape[0]} row(s), {links_section_df.shape[1]} column(s)"
+                )
+                if len(links_section_df) > 0:
+                    print(
+                        f"      ✓ Index levels: {links_section_df.index.names}"
+                    )
+                    print("      Sample data (first 3 rows):")
+                    print(links_section_df.head(3).to_string())
+
+                # Single-element export (first link)
+                if out_with_ts.n_links > 0:
+                    first_link = out_with_ts.link_labels[0]
+                    print(f"\n      Level 3: Single element export ({first_link})")
+                    link_ts_df = out_with_ts.to_dataframe("links", first_link)
+                    print(
+                        f"      ✓ Single link time series: {link_ts_df.shape[0]} row(s), {link_ts_df.shape[1]} column(s)"
+                    )
+                    print(f"      ✓ Time period: {link_ts_df.index.min()} to {link_ts_df.index.max()}")
+                    print("      Sample data (first 3 timesteps):")
+                    print(link_ts_df.head(3).to_string())
+
+            except ImportError:
+                print("      ⚠ pandas not installed, skipping DataFrame export")
+
         except (OSError, ValueError) as e:
             print(f"   ✗ Failed to parse output file: {e}")
 

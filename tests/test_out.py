@@ -203,3 +203,101 @@ class TestSwmmOutput:
 
         for pollutant_name, unit in units.items():
             assert unit in ["MG", "UG", "COUNTS", "UNKNOWN"]
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_no_timeseries(self):
+        """Test to_dataframe() without time series loaded."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=False)
+
+        # Full export should return dict with empty DataFrames
+        result = output.to_dataframe()
+        assert isinstance(result, dict)
+        assert "metadata" in result
+        assert "nodes" in result
+        assert "links" in result
+        assert "subcatchments" in result
+
+        # Metadata should have data (single row)
+        assert len(result["metadata"]) == 1
+        # Metadata should have some columns (varies based on load_time_series)
+        assert len(result["metadata"].columns) > 0
+
+        # Other sections should be empty
+        assert len(result["nodes"]) == 0
+        assert len(result["links"]) == 0
+        assert len(result["subcatchments"]) == 0
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_with_timeseries(self):
+        """Test to_dataframe() with time series loaded."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        # Full export
+        result = output.to_dataframe()
+        assert isinstance(result, dict)
+        assert "metadata" in result
+        assert "nodes" in result
+        assert "links" in result
+        assert "subcatchments" in result
+
+        # Check metadata
+        meta_df = result["metadata"]
+        assert len(meta_df) == 1
+        assert "n_periods" in meta_df.columns
+        assert meta_df["n_periods"].iloc[0] == output.n_periods
+
+        # Check time series sections (may have 0 rows if no data)
+        for section_name in ["nodes", "links", "subcatchments"]:
+            section_df = result[section_name]
+            if len(section_df) > 0:
+                # Should have MultiIndex
+                assert section_df.index.names == ["timestamp", "element_name"]
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_section_export(self):
+        """Test to_dataframe() section-level export."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        # Section export
+        nodes_df = output.to_dataframe("nodes")
+        links_df = output.to_dataframe("links")
+        subcatchments_df = output.to_dataframe("subcatchments")
+
+        # All should be DataFrames
+        for section_df in [nodes_df, links_df, subcatchments_df]:
+            assert hasattr(section_df, "shape")  # Is a DataFrame
+            if len(section_df) > 0:
+                # Should have MultiIndex if not empty
+                assert section_df.index.names == ["timestamp", "element_name"]
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_single_element(self):
+        """Test to_dataframe() single element export."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        # Get first link if available
+        if output.n_links > 0:
+            first_link = output.link_labels[0]
+            link_df = output.to_dataframe("links", first_link)
+
+            assert hasattr(link_df, "shape")  # Is a DataFrame
+            if len(link_df) > 0:
+                # Should have simple timestamp index
+                assert link_df.index.name == "timestamp"
+                # Should have value columns
+                assert any(col.startswith("value_") for col in link_df.columns)
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_invalid_element_type(self):
+        """Test to_dataframe() with invalid element type."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        with pytest.raises(ValueError):
+            output.to_dataframe("invalid_type")
+
+    @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
+    def test_to_dataframe_element_name_without_type(self):
+        """Test to_dataframe() with element_name but no element_type."""
+        output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
+
+        with pytest.raises(ValueError):
+            output.to_dataframe(element_name="SomeElement")

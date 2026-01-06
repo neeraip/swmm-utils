@@ -611,6 +611,143 @@ output.to_parquet("output_parquet/", single_file=False)
 #   - summary.parquet: System-level summary
 ```
 
+### DataFrame Export (Pandas/NumPy Analysis)
+
+Export time series data to Pandas DataFrames for advanced analysis and visualization:
+
+```python
+from swmm_utils import SwmmOutput
+
+# Load output file with full time series
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Export as DataFrames - three export levels available
+```
+
+**Level 1: Full Export** (all sections + metadata)
+
+```python
+# Export all data: metadata + all sections
+all_data = output.to_dataframe()
+
+# Returns dict with keys: 'metadata', 'nodes', 'links', 'subcatchments'
+metadata_df = all_data['metadata']        # Single-row DataFrame with simulation metadata
+nodes_df = all_data['nodes']              # MultiIndex DataFrame (timestamp, element_name)
+links_df = all_data['links']              # MultiIndex DataFrame (timestamp, element_name)
+subcatchments_df = all_data['subcatchments']  # MultiIndex DataFrame
+
+# Metadata example
+print(f"Version: {metadata_df['version'].iloc[0]}")
+print(f"Flow units: {metadata_df['flow_unit'].iloc[0]}")
+print(f"Total periods: {metadata_df['n_periods'].iloc[0]}")
+
+# Example: Find peak runoff per subcatchment
+if 'value_0' in subcatchments_df.columns:
+    peak_runoff = subcatchments_df.groupby(level='element_name')['value_0'].max()
+    print("Peak runoff by subcatchment:")
+    print(peak_runoff)
+```
+
+**Level 2: Section Export** (one section only)
+
+```python
+# Export specific section only - no metadata included
+nodes_df = output.to_dataframe('nodes')
+links_df = output.to_dataframe('links')
+subcatchments_df = output.to_dataframe('subcatchments')
+
+# Returns MultiIndex DataFrame (timestamp, element_name)
+# Useful for: Focused analysis on one element type
+
+# Example: Show all node values at a specific time
+timestamp = nodes_df.index.get_level_values('timestamp')[0]
+nodes_at_time = nodes_df.loc[timestamp]
+print(f"Node values at {timestamp}:")
+print(nodes_at_time)
+
+# Example: Export to CSV for external tools
+links_df.to_csv('links_timeseries.csv')
+```
+
+**Level 3: Single Element** (one element's full time series)
+
+```python
+# Export time series for a single element - simple timestamp index
+conduit_df = output.to_dataframe('links', 'Conduit1')
+junction_df = output.to_dataframe('nodes', 'J1')
+subcatch_df = output.to_dataframe('subcatchments', 'S1')
+
+# Returns DataFrame with timestamp index (one row per time step)
+# Columns: value_0, value_1, ... (one per reported variable)
+
+# Example: Plot time series
+import matplotlib.pyplot as plt
+
+flow = conduit_df['value_0']  # First (only) reported variable for link
+flow.plot(figsize=(12, 5))
+plt.xlabel('Time')
+plt.ylabel('Flow (CFS)')
+plt.title('Conduit1 Flow Over Time')
+plt.show()
+
+# Example: Statistics for single element
+print(f"Peak flow: {flow.max():.2f} CFS")
+print(f"Mean flow: {flow.mean():.2f} CFS")
+print(f"Duration > 1 CFS: {(flow > 1).sum()} timesteps")
+
+# Export to CSV
+conduit_df.to_csv('Conduit1_timeseries.csv')
+```
+
+**DataFrame Structure Details**
+
+| Export Level | Return Type          | Index                           | Use Case                                       |
+| ------------ | -------------------- | ------------------------------- | ---------------------------------------------- |
+| **Full**     | Dict[str, DataFrame] | Varies                          | All data with metadata                         |
+| **Section**  | DataFrame            | MultiIndex (timestamp, element) | Analyze one element type across all time steps |
+| **Single**   | DataFrame            | Simple (timestamp)              | Time series analysis for one element           |
+
+**Column Naming**
+
+The binary .out format doesn't store explicit variable names, so columns are named generically:
+- `value_0`, `value_1`, `value_2`, etc. - One per reported variable
+- Number of values depends on element type (e.g., links report 1 value, subcatchments report 8)
+
+To interpret the values, refer to SWMM documentation or use `output.summary()` which includes variable descriptions.
+
+**Example: Complete DataFrame Workflow**
+
+```python
+from swmm_utils import SwmmOutput
+import pandas as pd
+
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Get all subcatchment data
+subcatch_df = output.to_dataframe('subcatchments')
+
+# Filter to one subcatchment
+s1_data = output.to_dataframe('subcatchments', 'S1')
+
+# Time series analysis
+s1_runoff = s1_data['value_0']
+print(f"Total runoff volume: {s1_runoff.sum():.2f}")
+print(f"Peak runoff rate: {s1_runoff.max():.2f}")
+
+# Convert to hourly aggregation if needed
+hourly = s1_runoff.resample('1H').mean()
+print(f"\nHourly mean runoff:")
+print(hourly.head())
+
+# Merge with other data
+links_df = output.to_dataframe('links')
+combined = pd.concat({'subcatchment': s1_runoff, 'all_links': links_df.groupby(level='timestamp')['value_0'].sum()}, axis=1)
+print(f"\nCorrelation: {combined.corr().iloc[0, 1]:.3f}")
+
+# Export results
+combined.to_csv('analysis_results.csv')
+```
+
 ---
 
 ## Common Usage Patterns

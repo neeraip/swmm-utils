@@ -124,6 +124,7 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Decode all SWMM 5.2.4 input file sections (60+ sections)
 - ✅ Encode to .inp, JSON, and Parquet formats
 - ✅ Decode from .inp, JSON, and Parquet formats
+- ✅ Export to Pandas DataFrames for data analysis and manipulation
 - ✅ Configurable Parquet output (single-file or multi-file modes)
 - ✅ Round-trip conversion (load → modify → save) without data loss
 - ✅ Full support for comments, whitespace, and formatting
@@ -145,6 +146,8 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Access node, link, and subcatchment properties
 - ✅ Time index generation with full timestamp support
 - ✅ Export to JSON and Parquet formats
+- ✅ Export to Pandas DataFrames for time series analysis
+- ✅ Three-level DataFrame export: full data, sections, or individual elements
 - ✅ Pollutant tracking and water quality data
 - ✅ Efficient memory usage (metadata-based access, not full time series loading)
 - ✅ Element lookup by name
@@ -235,9 +238,9 @@ The architecture uses Python dictionaries as the in-memory data model:
 - `[LABELS]` - Map labels
 - `[TAGS]` - Object tags
 
-## Examples
+## Scenarios
 
-### Example 1: Input File - Decode and Analyze
+### Scenario 1: Input File - Decode and Analyze
 
 ```python
 from swmm_utils import SwmmInputDecoder
@@ -256,7 +259,7 @@ for junc in model.get('junctions', []):
         print(f"High junction: {junc['name']} at {junc['elevation']}m")
 ```
 
-### Example 2: Report File - Analyze Simulation Results
+### Scenario 2: Report File - Analyze Simulation Results
 
 ```python
 from swmm_utils import SwmmReport
@@ -287,7 +290,74 @@ with SwmmReport("results.rpt") as report:
         print(f"Warning: Continuity error {error:.2f}%")
 ```
 
-### Example 3: Convert Input Files for Analytics
+### Scenario 3: Export Input Files to Pandas DataFrames
+
+```python
+from swmm_utils import SwmmInput
+
+with SwmmInput("model.inp") as inp:
+    # Export all sections as dictionary of DataFrames
+    all_dfs = inp.to_dataframe()
+    
+    # Access specific section
+    junctions_df = all_dfs['junctions']
+    print(f"Model has {len(junctions_df)} junctions")
+    print(junctions_df[['name', 'elevation', 'max_depth']])
+    
+    # Analyze with pandas operations
+    conduits_df = all_dfs['conduits']
+    avg_length = conduits_df['length'].astype(float).mean()
+    print(f"Average conduit length: {avg_length:.2f}")
+    
+    # Or export specific section directly
+    subcatchments_df = inp.to_dataframe('subcatchments')
+    total_area = subcatchments_df['area'].astype(float).sum()
+    print(f"Total subcatchment area: {total_area:.2f}")
+    
+    # Export to CSV for external analysis
+    junctions_df.to_csv("junctions.csv", index=False)
+    conduits_df.to_csv("conduits.csv", index=False)
+```
+
+### Scenario 4: Export Specific Section to DataFrame
+
+```python
+from swmm_utils import SwmmInput
+import matplotlib.pyplot as plt
+
+with SwmmInput("model.inp") as inp:
+    # Export specific section to DataFrame
+    junctions_df = inp.to_dataframe('junctions')
+    
+    print("Junctions Summary:")
+    print(junctions_df[['name', 'elevation', 'max_depth', 'init_depth']])
+    
+    # Perform analysis on the section
+    print(f"\nStatistics:")
+    print(f"Number of junctions: {len(junctions_df)}")
+    print(f"Average elevation: {junctions_df['elevation'].astype(float).mean():.2f}")
+    print(f"Min/Max elevation: {junctions_df['elevation'].astype(float).min():.2f} / "
+          f"{junctions_df['elevation'].astype(float).max():.2f}")
+    
+    # Filter and analyze subset
+    high_junctions = junctions_df[junctions_df['elevation'].astype(float) > 100]
+    print(f"\nHigh-elevation junctions (>100): {len(high_junctions)}")
+    
+    # Export filtered results
+    high_junctions.to_csv("high_elevation_junctions.csv", index=False)
+    
+    # Visualize if matplotlib available
+    try:
+        junctions_df['elevation'].astype(float).hist(bins=20)
+        plt.xlabel('Elevation')
+        plt.ylabel('Count')
+        plt.title('Junction Elevation Distribution')
+        plt.savefig('elevation_distribution.png')
+    except ImportError:
+        pass
+```
+
+### Scenario 5: Convert Input Files for Analytics
 
 ```python
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
@@ -309,7 +379,7 @@ print(junctions.describe())
 print(f"Average pipe length: {conduits['length'].astype(float).mean():.2f}")
 ```
 
-### Example 4: Complete Workflow - Simulate and Analyze
+### Scenario 6: Complete Workflow - Simulate and Analyze
 
 ```python
 import subprocess
@@ -342,7 +412,105 @@ with SwmmReport("modified.rpt") as report:
         print(f"{link['name']}: {link['maximum_flow']:.2f} CFS")
 ```
 
-### Example 5: Batch Processing
+### Scenario 8: Output File - Time Series Analysis with DataFrames
+
+```python
+from swmm_utils import SwmmOutput
+import pandas as pd
+
+# Load output file with full time series
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Export full time series to dict of DataFrames
+full_data = output.to_dataframe()
+
+# Metadata for this simulation
+print(f"Version: {full_data['metadata']['version'].iloc[0]}")
+print(f"Flow units: {full_data['metadata']['flow_unit'].iloc[0]}")
+print(f"Total periods: {full_data['metadata']['n_periods'].iloc[0]}")
+
+# Access each section - MultiIndex DataFrames (timestamp, element_name)
+nodes_df = full_data['nodes']        # All nodes, all timesteps
+links_df = full_data['links']        # All links, all timesteps
+subcatchments_df = full_data['subcatchments']  # All subcatchments, all timesteps
+
+print(f"\nNodes: {nodes_df.shape[0]} rows, {nodes_df.shape[1]} columns")
+print(f"Links: {links_df.shape[0]} rows, {links_df.shape[1]} columns")
+print(f"Subcatchments: {subcatchments_df.shape[0]} rows, {subcatchments_df.shape[1]} columns")
+
+# Find peak inflow across all timesteps (if available)
+if 'value_0' in links_df.columns:
+    peak_by_link = links_df.groupby(level='element_name')['value_0'].max()
+    print(f"\nPeak flows by link:")
+    print(peak_by_link.nlargest(5))
+```
+
+### Scenario 9: Output File - Export Specific Section
+
+```python
+from swmm_utils import SwmmOutput
+
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Export only subcatchments section (no metadata)
+subcatchments_df = output.to_dataframe('subcatchments')
+
+print(f"Subcatchment Time Series Data:")
+print(f"Shape: {subcatchments_df.shape} (timesteps × elements × properties)")
+print(f"Index levels: {subcatchments_df.index.names}")
+
+# Filter: all timesteps for a specific subcatchment
+subcatch_name = subcatchments_df.index.get_level_values('element_name')[0]
+single_subcatch = output.to_dataframe('subcatchments', subcatch_name)
+
+print(f"\nSingle Subcatchment ({subcatch_name}):")
+print(f"Time period: {single_subcatch.index.min()} to {single_subcatch.index.max()}")
+print(f"Properties measured: {single_subcatch.shape[1]} values")
+print(single_subcatch.head())
+
+# Export to CSV for external analysis
+single_subcatch.to_csv(f"subcatchment_{subcatch_name}.csv")
+```
+
+### Scenario 10: Output File - Single Element Time Series
+
+```python
+from swmm_utils import SwmmOutput
+import matplotlib.pyplot as plt
+
+output = SwmmOutput("simulation.out", load_time_series=True)
+
+# Get time series for a specific link
+link_name = "Conduit1"
+link_df = output.to_dataframe('links', link_name)
+
+print(f"Conduit {link_name} time series:")
+print(f"Simulation period: {link_df.index.min()} to {link_df.index.max()}")
+print(f"Number of timesteps: {len(link_df)}")
+print("\nFirst 5 timesteps:")
+print(link_df.head())
+
+# Analyze the flow data
+if 'value_0' in link_df.columns:
+    flow = link_df['value_0']
+    print(f"\nFlow Statistics:")
+    print(f"  Peak: {flow.max():.2f}")
+    print(f"  Mean: {flow.mean():.2f}")
+    print(f"  Min: {flow.min():.2f}")
+    
+    # Plot time series if matplotlib available
+    try:
+        flow.plot(figsize=(12, 5))
+        plt.xlabel('Time')
+        plt.ylabel('Flow (CFS)')
+        plt.title(f'Conduit {link_name} Flow Time Series')
+        plt.tight_layout()
+        plt.savefig(f'{link_name}_flow_timeseries.png')
+    except ImportError:
+        pass
+```
+
+### Scenario 11: Batch Processing
 
 ```python
 from pathlib import Path
@@ -359,7 +527,7 @@ for inp_file in Path("models/").glob("*.inp"):
     print(f"Converted {inp_file.name} → {json_file.name}")
 ```
 
-### Example 6: LID Performance Analysis
+### Scenario 12: LID Performance Analysis
 
 ```python
 from swmm_utils import SwmmReport
@@ -383,7 +551,7 @@ with SwmmReport("lid_scenario.rpt") as report:
             print(f"{sub}: {reduction:.1f}% runoff reduction via infiltration")
 ```
 
-### Example 7: Round-Trip Conversion
+### Scenario 13: Round-Trip Conversion
 
 ```python
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
@@ -427,15 +595,15 @@ pytest tests/test_rpt.py -v
 
 All 40 tests pass, including comprehensive format conversion, round-trip tests, and report parsing.
 
-## Running Examples
+## Running Scenarios
 
-_Before running these examples, make sure you have the built SWMM binary executable `runswmm` in the `/bin` directory._
+_Before running these scenarios, make sure you have the built SWMM binary executable `runswmm` in the `/bin` directory._
 
 ```bash
-# Example 1: Basic input file operations
+# Scenario 1: Basic input file operations
 python examples/example1/example1.py
 
-# Example 2: Report parsing with water quality
+# Scenario 5: Report parsing with water quality
 python examples/example2/example2.py
 ```
 
@@ -490,7 +658,7 @@ Tested on diverse simulation results:
 ## Documentation
 
 - **[README.md](README.md)** - This file (overview and quick start)
-- **[examples/](examples/)** - Working examples with real SWMM models
+- **[examples/](examples/)** - Working scenarios with real SWMM models
 - **[docs/SWMM_INPUT_FILE.md](docs/SWMM_INPUT_FILE.md)** - Complete SWMM input file (.inp) format reference
 - **[docs/SWMM_REPORT_FILE.md](docs/SWMM_REPORT_FILE.md)** - Complete SWMM report file (.rpt) format reference  
 - **[docs/SWMM_OUTPUT_FILE.md](docs/SWMM_OUTPUT_FILE.md)** - Complete SWMM output file (.out) binary format reference
