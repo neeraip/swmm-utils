@@ -4,9 +4,9 @@ from setuptools import setup, find_packages
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
+    description = "EPA SWMM utility library"  # pylint: disable=invalid-name
     # Extract description from first non-header line
     lines = long_description.split("\n")
-    description = "EPA SWMM utility library"
     for line in lines:
         line = line.strip()
         if line and not line.startswith("#"):
