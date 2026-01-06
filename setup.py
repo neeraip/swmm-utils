@@ -13,7 +13,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="swmm-utils",
-    version="0.4.0",
+    version="0.4.1",
     author="NEER",
     author_email="support@neer.ai",
     description=description,
