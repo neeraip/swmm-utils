@@ -16,6 +16,7 @@ from .inp import SwmmInput
 from .rpt_decoder import SwmmReportDecoder
 from .rpt import SwmmReport
 from .out_decoder import SwmmOutputDecoder
+from .out_encoder import SwmmOutputEncoder
 from .out import SwmmOutput
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "SwmmReportDecoder",
     "SwmmOutput",  # Primary output file interface
     "SwmmOutputDecoder",
+    "SwmmOutputEncoder",
 ]
