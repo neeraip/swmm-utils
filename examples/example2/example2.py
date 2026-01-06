@@ -16,6 +16,7 @@ from swmm_utils import SwmmInput, SwmmReport, SwmmOutput
 
 
 def main():
+    """Load, simulate, and convert SWMM model files to various formats."""
     # Setup paths
     example_dir = Path(__file__).parent
     input_file = example_dir / "example2.inp"
@@ -35,7 +36,7 @@ def main():
     print(f"\n📖 Loading SWMM file: {input_file.name}")
 
     with SwmmInput(input_file) as inp:
-        print(f"   ✓ Successfully loaded!")
+        print("   ✓ Successfully loaded!")
         print(f"   ✓ Model title: {inp.title}")
         print(f"   ✓ Model contains {len(list(inp.keys()))} sections")
 
@@ -50,7 +51,7 @@ def main():
             print(f"   ✓ Conduits: {len(inp.conduits)}")
 
         # Output to JSON
-        print(f"\n💾 Saving to JSON format")
+        print("💾 Saving to JSON format")
         json_output = output_dir / "example2.inp.json"
         inp.to_json(json_output, pretty=True)
 
@@ -60,7 +61,7 @@ def main():
             print(f"   ✓ Size: {size:,} bytes")
 
         # Output to Parquet (multi-file mode)
-        print(f"\n💾 Saving to Parquet format (multi-file)")
+        print("💾 Saving to Parquet format (multi-file)")
         parquet_dir = output_dir / "example2.inp_parquet"
         inp.to_parquet(parquet_dir, single_file=False)
 
@@ -72,7 +73,7 @@ def main():
             print(f"   ✓ Total size: {total_size:,} bytes")
 
         # Output to Parquet (single-file mode)
-        print(f"\n💾 Saving to Parquet format (single-file)")
+        print("💾 Saving to Parquet format (single-file)")
         parquet_file = output_dir / "example2.inp.parquet"
         inp.to_parquet(parquet_file, single_file=True)
 
@@ -82,35 +83,33 @@ def main():
             print(f"   ✓ Size: {size:,} bytes")
 
         # Export to Pandas DataFrames
-        print(f"\n📊 Exporting to Pandas DataFrames")
+        print("📊 Exporting to Pandas DataFrames")
         try:
-            import pandas as pd
-
             # Export all sections to DataFrames
-            print(f"\n   📋 All Sections as DataFrames:")
+            print("\n   📋 All Sections as DataFrames:")
             all_dfs = inp.to_dataframe()
             print(f"      ✓ Sections available: {list(all_dfs.keys())}")
 
             # Export specific section to DataFrame
             if inp.junctions and "junctions" in all_dfs:
-                print(f"\n   📋 Junctions DataFrame:")
+                print("\n   📋 Junctions DataFrame:")
                 junctions_df = all_dfs["junctions"]
                 print(f"      ✓ Rows: {len(junctions_df)}")
                 print(f"      ✓ Columns: {list(junctions_df.columns)}")
-                print(f"\n      Sample data:")
+                print("      Sample data:")
                 print(junctions_df.head(3).to_string(index=False))
 
             # Access and manipulate specific dataframes
             if "conduits" in all_dfs and len(all_dfs["conduits"]) > 0:
-                print(f"\n   📋 Conduits DataFrame:")
+                print("\n   📋 Conduits DataFrame:")
                 conduits_df = all_dfs["conduits"]
                 print(f"      ✓ Rows: {len(conduits_df)}")
                 print(f"      ✓ Columns: {list(conduits_df.columns)}")
-                print(f"\n      Sample data:")
+                print("      Sample data:")
                 print(conduits_df.head(3).to_string(index=False))
 
                 # Example: Get statistics on numeric columns
-                numeric_cols = conduits_df.select_dtypes(include=['number']).columns
+                numeric_cols = conduits_df.select_dtypes(include=["number"]).columns
                 if len(numeric_cols) > 0:
                     print(f"\n      Numeric columns: {list(numeric_cols)}")
                     if "length" in numeric_cols:
@@ -122,13 +121,13 @@ def main():
 
             # Export subcatchments and calculate statistics
             if "subcatchments" in all_dfs and len(all_dfs["subcatchments"]) > 0:
-                print(f"\n   📋 Subcatchments DataFrame:")
+                print("\n   📋 Subcatchments DataFrame:")
                 subs_df = all_dfs["subcatchments"]
                 print(f"      ✓ Rows: {len(subs_df)}")
                 print(f"      ✓ Columns: {list(subs_df.columns)}")
 
                 # Show numeric column statistics
-                numeric_cols = subs_df.select_dtypes(include=['number']).columns
+                numeric_cols = subs_df.select_dtypes(include=["number"]).columns
                 if len(numeric_cols) > 0:
                     print(f"      ✓ Numeric columns: {list(numeric_cols)}")
                     for col in numeric_cols[:2]:  # Show first 2 numeric columns
@@ -138,22 +137,22 @@ def main():
                         )
 
         except ImportError:
-            print(f"   ⚠ pandas not installed, skipping DataFrame export")
+            print("   ⚠ pandas not installed, skipping DataFrame export")
 
     # Run SWMM simulation
-    print(f"\n🚀 Running SWMM simulation")
+    print("🚀 Running SWMM simulation")
     print(f"   Input: {input_file.name}")
     print(f"   Report: {report_file.name}")
     print(f"   Output: {output_file.name}")
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             [str(runswmm), str(input_file), str(report_file), str(output_file)],
             capture_output=True,
             text=True,
             check=True,
         )
-        print(f"   ✓ Simulation completed successfully!")
+        print("   ✓ Simulation completed successfully!")
 
         if report_file.exists():
             rpt_size = report_file.stat().st_size
@@ -172,11 +171,11 @@ def main():
 
     # Parse report file
     if report_file.exists():
-        print(f"\n📊 Parsing SWMM report file")
+        print("📊 Parsing SWMM report file")
         with SwmmReport(report_file) as report:
-            print(f"   ✓ Successfully parsed!")
+            print("   ✓ Successfully parsed!")
             print(f"   ✓ SWMM Version: {report.header.get('version', 'Unknown')}")
-            print(f"   ✓ Analysis Options:")
+            print("   ✓ Analysis Options:")
             print(
                 f"      - Flow Units: {report.analysis_options.get('flow_units', 'N/A')}"
             )
@@ -186,7 +185,7 @@ def main():
 
             # Show subcatchment runoff summary
             if report.subcatchment_runoff:
-                print(f"\n   📈 Subcatchment Runoff Summary:")
+                print("\n   📈 Subcatchment Runoff Summary:")
                 for sub in report.subcatchment_runoff:
                     print(
                         f"      {sub['name']}: {sub['peak_runoff']:.2f} CFS peak, {sub['runoff_coeff']:.3f} coeff"
@@ -194,7 +193,7 @@ def main():
 
             # Show node depth summary
             if report.node_depth:
-                print(f"\n   💧 Node Depth Summary:")
+                print("\n   💧 Node Depth Summary:")
                 for node in report.node_depth:
                     print(
                         f"      {node['name']} ({node['type']}): {node['maximum_depth']:.2f} ft max depth"
@@ -202,11 +201,11 @@ def main():
 
     # Parse output file
     if output_file.exists():
-        print(f"\n💾 Parsing SWMM output file")
+        print("💾 Parsing SWMM output file")
         try:
             # Approach 1: Load metadata only (default behavior, fast and lightweight)
             out = SwmmOutput(output_file)
-            print(f"   ✓ Successfully parsed!")
+            print("   ✓ Successfully parsed!")
             print(f"   ✓ SWMM Version: {out.version}")
             print(f"   ✓ Flow Unit: {out.flow_unit}")
             print(
@@ -217,7 +216,7 @@ def main():
 
             # Show model summary
             summary = out.summary()
-            print(f"\n   📋 Model Summary:")
+            print("\n   📋 Model Summary:")
             print(f"      - Subcatchments: {summary['n_subcatchments']}")
             print(f"      - Nodes: {summary['n_nodes']}")
             print(f"      - Links: {summary['n_links']}")
@@ -226,7 +225,7 @@ def main():
                 print(f"      - Pollutant List: {', '.join(summary['pollutants'])}")
 
             # Export output to JSON (metadata only)
-            print(f"\n   💾 Saving output metadata to JSON format")
+            print("\n   💾 Saving output metadata to JSON format")
             out_json = output_dir / "example2.out.json"
             out.to_json(out_json, pretty=True)
             if out_json.exists():
@@ -234,14 +233,14 @@ def main():
                 print(f"      ✓ Saved: {out_json.name} ({size:,} bytes)")
 
             # Approach 2: Load with full time series data (for comprehensive analysis)
-            print(f"\n   💾 Loading output file with full time series data")
+            print("\n   💾 Loading output file with full time series data")
             out_with_ts = SwmmOutput(output_file, load_time_series=True)
             print(
                 f"      ✓ Loaded with time series data from {out_with_ts.n_periods} time steps"
             )
 
             # Export output to JSON (with full time series)
-            print(f"\n   💾 Saving output with full time series to JSON format")
+            print("\n   💾 Saving output with full time series to JSON format")
             out_json_ts = output_dir / "example2.out_with_timeseries.json"
             out_with_ts.to_json(out_json_ts, pretty=True)
             if out_json_ts.exists():
@@ -254,7 +253,7 @@ def main():
                     )
 
             # Export output to Parquet (single file)
-            print(f"\n   💾 Saving output metadata to Parquet format (single-file)")
+            print("\n   💾 Saving output metadata to Parquet format (single-file)")
             out_parquet = output_dir / "example2.out.parquet"
             try:
                 out.to_parquet(out_parquet, single_file=True)
@@ -262,10 +261,10 @@ def main():
                     size = out_parquet.stat().st_size
                     print(f"      ✓ Saved: {out_parquet.name} ({size:,} bytes)")
             except ImportError:
-                print(f"      ⚠ pandas/pyarrow not installed, skipping Parquet export")
+                print("      ⚠ pandas/pyarrow not installed, skipping Parquet export")
 
             # Export output to Parquet (multi-file)
-            print(f"\n   💾 Saving output metadata to Parquet format (multi-file)")
+            print("\n   💾 Saving output metadata to Parquet format (multi-file)")
             out_parquet_dir = output_dir / "example2.out_parquet"
             try:
                 out.to_parquet(out_parquet_dir, single_file=False)
@@ -276,13 +275,13 @@ def main():
                     print(f"      ✓ Files created: {len(parquet_files)}")
                     print(f"      ✓ Total size: {total_size:,} bytes")
             except ImportError:
-                print(f"      ⚠ pandas/pyarrow not installed, skipping Parquet export")
+                print("      ⚠ pandas/pyarrow not installed, skipping Parquet export")
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"   ✗ Failed to parse output file: {e}")
 
     # Summary
-    print(f"\n" + "=" * 80)
+    print("\n" + "=" * 80)
     print("✅ Example completed successfully!")
     print("=" * 80)
     print(f"\nOutput directory: {output_dir}")

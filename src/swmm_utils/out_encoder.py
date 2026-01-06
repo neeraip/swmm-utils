@@ -67,9 +67,7 @@ class SwmmOutputEncoder:
                 "properties": data["metadata"]["properties"],
                 "variables": data["metadata"]["variables"],
                 "start_date": data["metadata"]["start_date"].isoformat(),
-                "report_interval_seconds": data["metadata"][
-                    "report_interval_seconds"
-                ],
+                "report_interval_seconds": data["metadata"]["report_interval_seconds"],
                 "n_periods": data["metadata"]["n_periods"],
             },
         }
@@ -179,7 +177,9 @@ class SwmmOutputEncoder:
                 subcatch_data = []
                 for subcatch_id in subcatch_labels:
                     if subcatch_id in subcatch_props:
-                        subcatch_data.append({"id": subcatch_id, **subcatch_props[subcatch_id]})
+                        subcatch_data.append(
+                            {"id": subcatch_id, **subcatch_props[subcatch_id]}
+                        )
                 if subcatch_data:
                     df_subcatch = pd.DataFrame(subcatch_data)
                     df_subcatch.to_parquet(

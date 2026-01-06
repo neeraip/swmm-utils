@@ -32,10 +32,10 @@ test-cov:
 	@echo "Coverage report generated in htmlcov/index.html"
 
 lint:
-	flake8 src tests
+	pylint src tests examples setup.py
 
 format:
-	black src tests setup.py
+	black src tests examples setup.py
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

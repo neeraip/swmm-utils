@@ -428,7 +428,7 @@ POL2             ug/L   0.1       0.2       0.3       0.4
     pol1 = model["pollutants"][0]
     assert pol1["name"] == "POL1"
     assert pol1["units"] == "mg/L"
-    
+
     pol2 = model["pollutants"][1]
     assert pol2["name"] == "POL2"
     assert pol2["units"] == "ug/L"

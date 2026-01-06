@@ -1,4 +1,10 @@
-"""SWMM input file encoder - encode dicts to .inp, .json, or .parquet formats."""
+"""SWMM input file encoder - encode dicts to .inp, .json, or .parquet formats.
+
+This module contains all input encoding functionality. While it exceeds the standard
+line limit, it remains a cohesive, single-purpose module focused entirely on encoding
+SWMM input models to various formats.
+"""
+# pylint: disable=too-many-lines
 
 import json
 from typing import Any, Dict, Optional, TextIO, Union
@@ -118,9 +124,7 @@ class SwmmInputEncoder:
         # Return the JSON string for backwards compatibility
         return json.dumps(model, indent=2 if pretty else None)
 
-    def encode_to_dataframe(
-        self, model: Dict[str, Any], section: Optional[str] = None
-    ):
+    def encode_to_dataframe(self, model: Dict[str, Any], section: Optional[str] = None):
         """Encode SWMM model section(s) to Pandas DataFrame(s).
 
         Args:
@@ -946,7 +950,9 @@ class SwmmInputEncoder:
         """Write [POLLUTANTS] section."""
         if "pollutants" in model and model["pollutants"]:
             self._write_section_header(file, "POLLUTANTS")
-            file.write(";;Name           Units    CRain    CGW      CRDII    KDecay   SnowOnly\n")
+            file.write(
+                ";;Name           Units    CRain    CGW      CRDII    KDecay   SnowOnly\n"
+            )
 
             for pollutant in model["pollutants"]:
                 name = self._get_field(pollutant, "name")
@@ -991,7 +997,9 @@ class SwmmInputEncoder:
         """Write [BUILDUP] section."""
         if "buildup" in model and model["buildup"]:
             self._write_section_header(file, "BUILDUP")
-            file.write(";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3\n")
+            file.write(
+                ";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3\n"
+            )
 
             for entry in model["buildup"]:
                 landuse = self._get_field(entry, "landuse")
@@ -1010,7 +1018,9 @@ class SwmmInputEncoder:
         """Write [WASHOFF] section."""
         if "washoff" in model and model["washoff"]:
             self._write_section_header(file, "WASHOFF")
-            file.write(";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3   Sweeping\n")
+            file.write(
+                ";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3   Sweeping\n"
+            )
 
             for entry in model["washoff"]:
                 landuse = self._get_field(entry, "landuse")
@@ -1094,4 +1104,6 @@ class SwmmInputEncoder:
                 sewer_area = self._get_field(entry, "sewer_area", default="0")
                 factor = self._get_field(entry, "factor", default="1")
 
-                file.write(f"{node:<16} {unithydrograph:<16} {sewer_area:<8} {factor}\n")
+                file.write(
+                    f"{node:<16} {unithydrograph:<16} {sewer_area:<8} {factor}\n"
+                )

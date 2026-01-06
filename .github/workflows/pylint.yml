@@ -21,7 +21,7 @@ jobs:
       - name: Analysing the code with pylint
         run: |
           exit_code=0
-          pylint --disable=import-error $(git ls-files 'src/**/*.py' 'tests/**/*.py') || exit_code=$?
+          pylint src tests examples setup.py || exit_code=$?
           # Exit codes: 0=success, 1=warnings, 2+=errors. Allow warnings (exit code 1)
           [ "$exit_code" -le 1 ] && exit 0 || exit $exit_code
         shell: bash

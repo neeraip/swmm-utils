@@ -150,14 +150,20 @@ def test_roundtrip(tmp_path):
     # Compare all sections that should be present
     assert model1["title"] == model2["title"], "Title mismatch"
     assert model1["options"] == model2["options"], "Options mismatch"
-    
+
     # Compare list sections
-    assert len(model1["raingages"]) == len(model2["raingages"]), "Raingages count mismatch"
-    assert len(model1["subcatchments"]) == len(model2["subcatchments"]), "Subcatchments count mismatch"
-    assert len(model1["junctions"]) == len(model2["junctions"]), "Junctions count mismatch"
+    assert len(model1["raingages"]) == len(
+        model2["raingages"]
+    ), "Raingages count mismatch"
+    assert len(model1["subcatchments"]) == len(
+        model2["subcatchments"]
+    ), "Subcatchments count mismatch"
+    assert len(model1["junctions"]) == len(
+        model2["junctions"]
+    ), "Junctions count mismatch"
     assert len(model1["outfalls"]) == len(model2["outfalls"]), "Outfalls count mismatch"
     assert len(model1["conduits"]) == len(model2["conduits"]), "Conduits count mismatch"
-    
+
     # Deep comparison of specific items
     for i, j1 in enumerate(model1["junctions"]):
         j2 = model2["junctions"][i]
@@ -236,26 +242,34 @@ TS1                         1:00       0.5
 
     # Verify quality sections round-trip with semantic equivalence
     # (re-encoded data may have additional default fields filled in)
-    
-    assert "pollutants" in model1 and "pollutants" in model2, "Missing pollutants section"
-    assert len(model1["pollutants"]) == len(model2["pollutants"]), "Pollutants count mismatch"
+
+    assert (
+        "pollutants" in model1 and "pollutants" in model2
+    ), "Missing pollutants section"
+    assert len(model1["pollutants"]) == len(
+        model2["pollutants"]
+    ), "Pollutants count mismatch"
     # Check primary fields match
     for i, p1 in enumerate(model1["pollutants"]):
         p2 = model2["pollutants"][i]
         assert p1["name"] == p2["name"], f"Pollutant {i} name mismatch"
         assert p1["units"] == p2["units"], f"Pollutant {i} units mismatch"
-    
+
     assert "landuses" in model1 and "landuses" in model2, "Missing landuses section"
     assert len(model1["landuses"]) == len(model2["landuses"]), "Landuses count mismatch"
     for i, l1 in enumerate(model1["landuses"]):
         l2 = model2["landuses"][i]
         assert l1["name"] == l2["name"], f"Landuse {i} name mismatch"
-        assert l1["percent_imperv"] == l2["percent_imperv"], f"Landuse {i} percent_imperv mismatch"
-    
+        assert (
+            l1["percent_imperv"] == l2["percent_imperv"]
+        ), f"Landuse {i} percent_imperv mismatch"
+
     assert "coverages" in model1 and "coverages" in model2, "Missing coverages section"
-    assert len(model1["coverages"]) == len(model2["coverages"]), "Coverages count mismatch"
+    assert len(model1["coverages"]) == len(
+        model2["coverages"]
+    ), "Coverages count mismatch"
     assert model1["coverages"] == model2["coverages"], "Coverages data mismatch"
-    
+
     assert "buildup" in model1 and "buildup" in model2, "Missing buildup section"
     assert len(model1["buildup"]) == len(model2["buildup"]), "Buildup count mismatch"
     for i, b1 in enumerate(model1["buildup"]):
@@ -264,7 +278,7 @@ TS1                         1:00       0.5
         assert b1["pollutant"] == b2["pollutant"], f"Buildup {i} pollutant mismatch"
         assert b1["function"] == b2["function"], f"Buildup {i} function mismatch"
         assert b1["coeff1"] == b2["coeff1"], f"Buildup {i} coeff1 mismatch"
-    
+
     assert "washoff" in model1 and "washoff" in model2, "Missing washoff section"
     assert len(model1["washoff"]) == len(model2["washoff"]), "Washoff count mismatch"
     for i, w1 in enumerate(model1["washoff"]):
@@ -280,16 +294,16 @@ def test_encoder_to_dataframe_single_section():
     """Test encoding a single section to DataFrame."""
     pd = pytest.importorskip("pandas")
     encoder = SwmmInputEncoder()
-    
+
     model = {
         "junctions": [
             {"name": "J1", "elevation": 100, "max_depth": 5},
             {"name": "J2", "elevation": 95, "max_depth": 6},
         ]
     }
-    
+
     df = encoder.encode_to_dataframe(model, section="junctions")
-    
+
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 2
     assert list(df.columns) == ["name", "elevation", "max_depth"]
@@ -300,7 +314,7 @@ def test_encoder_to_dataframe_all_sections():
     """Test encoding all sections to DataFrame dictionary."""
     pd = pytest.importorskip("pandas")
     encoder = SwmmInputEncoder()
-    
+
     model = {
         "junctions": [
             {"name": "J1", "elevation": 100},
@@ -311,9 +325,9 @@ def test_encoder_to_dataframe_all_sections():
         ],
         "title": "Test Model",
     }
-    
+
     dfs = encoder.encode_to_dataframe(model)
-    
+
     assert isinstance(dfs, dict)
     assert "junctions" in dfs
     assert "outfalls" in dfs
@@ -326,11 +340,11 @@ def test_encoder_to_dataframe_empty_section():
     """Test encoding empty section returns empty DataFrame."""
     pd = pytest.importorskip("pandas")
     encoder = SwmmInputEncoder()
-    
+
     model = {"junctions": []}
-    
+
     df = encoder.encode_to_dataframe(model, section="junctions")
-    
+
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 0
 
@@ -338,9 +352,9 @@ def test_encoder_to_dataframe_empty_section():
 def test_encoder_to_dataframe_nonexistent_section():
     """Test error when section doesn't exist."""
     encoder = SwmmInputEncoder()
-    
+
     model = {"junctions": []}
-    
+
     with pytest.raises(ValueError, match="not found in model"):
         encoder.encode_to_dataframe(model, section="nonexistent")
 
@@ -348,9 +362,9 @@ def test_encoder_to_dataframe_nonexistent_section():
 def test_encoder_to_dataframe_non_list_section():
     """Test error when section is not a list."""
     encoder = SwmmInputEncoder()
-    
+
     model = {"title": "Test Model"}
-    
+
     with pytest.raises(ValueError, match="is not a list"):
         encoder.encode_to_dataframe(model, section="title")
 
@@ -359,7 +373,7 @@ def test_encoder_writes_pollutants(tmp_path):
     """Test writing POLLUTANTS section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -372,16 +386,16 @@ FLOW_UNITS    CFS
 POL1             mg/L   
 POL2             ug/L   
 """
-    
+
     # Decode
     model = decoder.decode(StringIO(inp_data))
-    
+
     # Encode
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
-    
+
     # Verify POLLUTANTS section exists
     with open(output_file) as f:
         content = f.read()
@@ -393,7 +407,7 @@ def test_encoder_writes_landuses(tmp_path):
     """Test writing LANDUSES section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -405,11 +419,11 @@ FLOW_UNITS    CFS
 ;;Name           PercentImperv
 LAND1            25
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -421,7 +435,7 @@ def test_encoder_writes_coverages(tmp_path):
     """Test writing COVERAGES section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -433,11 +447,11 @@ FLOW_UNITS    CFS
 ;;Subcatchment   LandUse          Percent
 S1               LAND1            100
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -448,7 +462,7 @@ def test_encoder_writes_buildup(tmp_path):
     """Test writing BUILDUP section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -460,11 +474,11 @@ FLOW_UNITS    CFS
 ;;LandUse         Pollutant        Function   Coeff1   
 LAND1            POL1             LINEAR     10       
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -475,7 +489,7 @@ def test_encoder_writes_washoff(tmp_path):
     """Test writing WASHOFF section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -487,11 +501,11 @@ FLOW_UNITS    CFS
 ;;LandUse         Pollutant        Function   Coeff1   
 LAND1            POL1             EMC        5        
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -502,7 +516,7 @@ def test_encoder_writes_lid_controls(tmp_path):
     """Test writing LID_CONTROLS section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -514,11 +528,11 @@ FLOW_UNITS    CFS
 ;;Name           Type/Layer Parameters
 LID1             BC
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -529,7 +543,7 @@ def test_encoder_writes_lid_usage(tmp_path):
     """Test writing LID_USAGE section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -541,11 +555,11 @@ FLOW_UNITS    CFS
 ;;Subcatchment   LID Process      Number   
 S1               LID1             1        
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -556,7 +570,7 @@ def test_encoder_writes_files(tmp_path):
     """Test writing FILES section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -568,11 +582,11 @@ FLOW_UNITS    CFS
 ;;Type            File Path
 RAINFALL          /path/to/rain.dat
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -583,7 +597,7 @@ def test_encoder_writes_hydrographs(tmp_path):
     """Test writing HYDROGRAPHS section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -595,11 +609,11 @@ FLOW_UNITS    CFS
 ;;Name           Response      R1-R2          Values
 UH1              R   0
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -610,7 +624,7 @@ def test_encoder_writes_rdii(tmp_path):
     """Test writing RDII section to INP file."""
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     inp_data = """
 [TITLE]
 Test Model
@@ -622,11 +636,11 @@ FLOW_UNITS    CFS
 ;;Node           UnitHydrograph  SewerArea   Factor
 J1               UH1             0.5         1.0
 """
-    
+
     model = decoder.decode(StringIO(inp_data))
     output_file = tmp_path / "output.inp"
     encoder.encode_to_file(model, str(output_file))
-    
+
     assert output_file.exists()
     with open(output_file) as f:
         content = f.read()
@@ -637,41 +651,44 @@ def test_roundtrip_real_example_file_with_quality():
     """Test round-trip with real example file containing quality sections."""
     from pathlib import Path
     import tempfile
-    
+
     # Use example2.inp which has quality sections
-    example_file = Path(__file__).parent.parent / "examples" / "example2" / "example2.inp"
-    
+    example_file = (
+        Path(__file__).parent.parent / "examples" / "example2" / "example2.inp"
+    )
+
     if not example_file.exists():
         pytest.skip(f"Example file not found: {example_file}")
-    
+
     decoder = SwmmInputDecoder()
     encoder = SwmmInputEncoder()
-    
+
     # Load real example file
     model1 = decoder.decode_file(str(example_file))
-    
+
     # Check that it has quality sections
     has_quality_sections = any(
-        key in model1 
+        key in model1
         for key in ["pollutants", "landuses", "coverages", "buildup", "washoff"]
     )
-    
+
     if not has_quality_sections:
         pytest.skip("Example file doesn't have quality sections")
-    
+
     # Encode to temporary file
     with tempfile.TemporaryDirectory() as tmp:
         temp_file = Path(tmp) / "roundtrip.inp"
         encoder.encode_to_file(model1, str(temp_file))
-        
+
         # Decode again
         model2 = decoder.decode_file(str(temp_file))
-        
+
         # Verify all sections are present
         for section in model1:
             assert section in model2, f"Section {section} missing after round-trip"
-            
+
             # For list sections, verify counts match
             if isinstance(model1[section], list):
-                assert len(model1[section]) == len(model2[section]), \
-                    f"Section {section} count mismatch: {len(model1[section])} vs {len(model2[section])}"
+                assert len(model1[section]) == len(
+                    model2[section]
+                ), f"Section {section} count mismatch: {len(model1[section])} vs {len(model2[section])}"

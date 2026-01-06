@@ -170,6 +170,7 @@ def test_swmm_input_repr():
         assert "SwmmInput" in repr_str
         assert "sections=" in repr_str
 
+
 # ============================================================================
 # PROPERTY SETTER TESTS
 # ============================================================================
@@ -323,7 +324,12 @@ def test_input_setter_buildup():
     """Test buildup property setter."""
     with SwmmInput() as inp:
         buildup = [
-            {"landuse": "LAND1", "pollutant": "POL1", "func_type": "LINEAR", "coeff": 10},
+            {
+                "landuse": "LAND1",
+                "pollutant": "POL1",
+                "func_type": "LINEAR",
+                "coeff": 10,
+            },
         ]
         inp.buildup = buildup
         assert inp.buildup == buildup
@@ -459,7 +465,7 @@ def test_input_items():
         items = list(inp.items())
         # Should have title and junctions
         assert len(items) == 2
-        
+
         # Check that items contain the right keys and values
         keys_from_items = [k for k, v in items]
         assert "title" in keys_from_items
@@ -474,12 +480,12 @@ def test_input_to_dict():
         inp.outfalls = [{"name": "O1", "elevation": 90}]
 
         model_dict = inp.to_dict()
-        
+
         assert isinstance(model_dict, dict)
         assert model_dict["title"] == "Test"
         assert len(model_dict["junctions"]) == 1
         assert len(model_dict["outfalls"]) == 1
-        
+
         # Verify it's a copy, not a reference
         model_dict["title"] = "Modified"
         assert inp.title == "Test"  # Original unchanged
@@ -493,7 +499,7 @@ def test_input_to_dict():
 def test_input_load_invalid_format():
     """Test loading a file with unsupported format."""
     invalid_file = Path("/tmp/test.xyz")
-    
+
     with pytest.raises(ValueError, match="Unsupported file format"):
         SwmmInput(invalid_file)
 
@@ -501,7 +507,7 @@ def test_input_load_invalid_format():
 def test_input_load_nonexistent_file():
     """Test loading a non-existent file."""
     nonexistent_file = Path("/tmp/this_file_does_not_exist_12345.inp")
-    
+
     with pytest.raises(FileNotFoundError):
         SwmmInput(nonexistent_file)
 
@@ -509,7 +515,7 @@ def test_input_load_nonexistent_file():
 def test_input_load_nonexistent_json():
     """Test loading a non-existent JSON file."""
     nonexistent_file = Path("/tmp/this_file_does_not_exist_12345.json")
-    
+
     # JSON decoder may raise different error - just check it raises an exception
     with pytest.raises((FileNotFoundError, Exception)):
         SwmmInput(nonexistent_file)
@@ -518,7 +524,7 @@ def test_input_load_nonexistent_json():
 def test_input_load_nonexistent_parquet():
     """Test loading a non-existent Parquet file."""
     nonexistent_file = Path("/tmp/this_file_does_not_exist_12345.parquet")
-    
+
     with pytest.raises(FileNotFoundError):
         SwmmInput(nonexistent_file)
 
@@ -527,13 +533,13 @@ def test_input_export_to_invalid_path(tmp_path):
     """Test exporting to INP requires parent directory to exist."""
     with SwmmInput() as inp:
         inp.title = "Test"
-        
+
         # Parent directory must exist - encoders don't create it
         deep_path = tmp_path / "deep"
         deep_path.mkdir()
         output_path = deep_path / "model.inp"
         inp.to_inp(output_path)
-        
+
         assert output_path.exists()
 
 
@@ -541,13 +547,13 @@ def test_input_export_json_creates_directory(tmp_path):
     """Test exporting to JSON with existing parent directory."""
     with SwmmInput() as inp:
         inp.title = "Test"
-        
+
         # Parent directory must exist - encoders don't create it
         deep_path = tmp_path / "deep"
         deep_path.mkdir()
         output_path = deep_path / "model.json"
         inp.to_json(output_path)
-        
+
         assert output_path.exists()
 
 
@@ -556,13 +562,13 @@ def test_input_export_parquet_creates_directory(tmp_path):
     with SwmmInput() as inp:
         inp.title = "Test"
         inp.junctions = [{"name": "J1"}]
-        
+
         # Parent directory must exist - encoders don't create it
         deep_path = tmp_path / "deep"
         deep_path.mkdir()
         output_path = deep_path / "model.parquet"
         inp.to_parquet(output_path, single_file=True)
-        
+
         # Parent directories should be created
         assert output_path.exists()
 
@@ -571,15 +577,15 @@ def test_input_export_parquet_creates_directory(tmp_path):
 def test_input_to_dataframe_single_section():
     """Test exporting a single section to DataFrame."""
     pd = pytest.importorskip("pandas")
-    
+
     with SwmmInput() as inp:
         inp.junctions = [
             {"name": "J1", "elevation": 100, "max_depth": 5},
             {"name": "J2", "elevation": 95, "max_depth": 6},
         ]
-        
+
         df = inp.to_dataframe("junctions")
-        
+
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 2
         assert "name" in df.columns
@@ -589,7 +595,7 @@ def test_input_to_dataframe_single_section():
 def test_input_to_dataframe_all_sections():
     """Test exporting all sections to DataFrame dictionary."""
     pd = pytest.importorskip("pandas")
-    
+
     with SwmmInput() as inp:
         inp.junctions = [
             {"name": "J1", "elevation": 100},
@@ -599,9 +605,9 @@ def test_input_to_dataframe_all_sections():
             {"name": "O1", "elevation": 80},
         ]
         inp.title = "Test Model"
-        
+
         dfs = inp.to_dataframe()
-        
+
         assert isinstance(dfs, dict)
         assert "junctions" in dfs
         assert "outfalls" in dfs
@@ -613,12 +619,12 @@ def test_input_to_dataframe_all_sections():
 def test_input_to_dataframe_empty():
     """Test exporting empty section returns empty DataFrame."""
     pd = pytest.importorskip("pandas")
-    
+
     with SwmmInput() as inp:
         inp.junctions = []
-        
+
         df = inp.to_dataframe("junctions")
-        
+
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 0
 
@@ -633,7 +639,7 @@ def test_input_to_dataframe_invalid_section():
 def test_input_to_dataframe_complex_data():
     """Test DataFrame export with complex nested data."""
     pd = pytest.importorskip("pandas")
-    
+
     with SwmmInput() as inp:
         inp.conduits = [
             {
@@ -651,9 +657,9 @@ def test_input_to_dataframe_complex_data():
                 "roughness": 0.012,
             },
         ]
-        
+
         df = inp.to_dataframe("conduits")
-        
+
         assert len(df) == 2
         assert df.loc[df["name"] == "C1", "length"].values[0] == 1000
         assert df.loc[df["name"] == "C2", "roughness"].values[0] == 0.012
