@@ -92,6 +92,25 @@ class SwmmInput:
             self._data, str(output_path), single_file=single_file
         )
 
+    def to_dataframe(self, section: Optional[str] = None):
+        """Export to Pandas DataFrame(s).
+
+        Args:
+            section: Optional specific section name to convert. If None, returns all sections.
+
+        Returns:
+            Pandas DataFrame if section is specified, or Dict[str, DataFrame] for all sections.
+            Only sections with list data (junctions, conduits, etc.) are included.
+
+        Example:
+            # Export specific section
+            junctions_df = inp.to_dataframe('junctions')
+
+            # Export all sections as dictionary of dataframes
+            all_dfs = inp.to_dataframe()
+        """
+        return self._encoder.encode_to_dataframe(self._data, section)
+
     # Typed properties for common SWMM sections
 
     @property

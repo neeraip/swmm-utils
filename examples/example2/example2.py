@@ -81,6 +81,65 @@ def main():
             print(f"   ✓ Saved: {parquet_file}")
             print(f"   ✓ Size: {size:,} bytes")
 
+        # Export to Pandas DataFrames
+        print(f"\n📊 Exporting to Pandas DataFrames")
+        try:
+            import pandas as pd
+
+            # Export all sections to DataFrames
+            print(f"\n   📋 All Sections as DataFrames:")
+            all_dfs = inp.to_dataframe()
+            print(f"      ✓ Sections available: {list(all_dfs.keys())}")
+
+            # Export specific section to DataFrame
+            if inp.junctions and "junctions" in all_dfs:
+                print(f"\n   📋 Junctions DataFrame:")
+                junctions_df = all_dfs["junctions"]
+                print(f"      ✓ Rows: {len(junctions_df)}")
+                print(f"      ✓ Columns: {list(junctions_df.columns)}")
+                print(f"\n      Sample data:")
+                print(junctions_df.head(3).to_string(index=False))
+
+            # Access and manipulate specific dataframes
+            if "conduits" in all_dfs and len(all_dfs["conduits"]) > 0:
+                print(f"\n   📋 Conduits DataFrame:")
+                conduits_df = all_dfs["conduits"]
+                print(f"      ✓ Rows: {len(conduits_df)}")
+                print(f"      ✓ Columns: {list(conduits_df.columns)}")
+                print(f"\n      Sample data:")
+                print(conduits_df.head(3).to_string(index=False))
+
+                # Example: Get statistics on numeric columns
+                numeric_cols = conduits_df.select_dtypes(include=['number']).columns
+                if len(numeric_cols) > 0:
+                    print(f"\n      Numeric columns: {list(numeric_cols)}")
+                    if "length" in numeric_cols:
+                        print(
+                            f"      Length statistics: min={conduits_df['length'].min():.0f}, "
+                            f"mean={conduits_df['length'].mean():.0f}, "
+                            f"max={conduits_df['length'].max():.0f}"
+                        )
+
+            # Export subcatchments and calculate statistics
+            if "subcatchments" in all_dfs and len(all_dfs["subcatchments"]) > 0:
+                print(f"\n   📋 Subcatchments DataFrame:")
+                subs_df = all_dfs["subcatchments"]
+                print(f"      ✓ Rows: {len(subs_df)}")
+                print(f"      ✓ Columns: {list(subs_df.columns)}")
+
+                # Show numeric column statistics
+                numeric_cols = subs_df.select_dtypes(include=['number']).columns
+                if len(numeric_cols) > 0:
+                    print(f"      ✓ Numeric columns: {list(numeric_cols)}")
+                    for col in numeric_cols[:2]:  # Show first 2 numeric columns
+                        print(
+                            f"      {col}: min={subs_df[col].min()}, "
+                            f"mean={subs_df[col].mean():.2f}, max={subs_df[col].max()}"
+                        )
+
+        except ImportError:
+            print(f"   ⚠ pandas not installed, skipping DataFrame export")
+
     # Run SWMM simulation
     print(f"\n🚀 Running SWMM simulation")
     print(f"   Input: {input_file.name}")

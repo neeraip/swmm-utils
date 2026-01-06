@@ -153,5 +153,86 @@ def test_roundtrip(tmp_path):
     assert len(model1["conduits"]) == len(model2["conduits"])
 
 
+# DATAFRAME TESTS
+def test_encoder_to_dataframe_single_section():
+    """Test encoding a single section to DataFrame."""
+    pd = pytest.importorskip("pandas")
+    encoder = SwmmInputEncoder()
+    
+    model = {
+        "junctions": [
+            {"name": "J1", "elevation": 100, "max_depth": 5},
+            {"name": "J2", "elevation": 95, "max_depth": 6},
+        ]
+    }
+    
+    df = encoder.encode_to_dataframe(model, section="junctions")
+    
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 2
+    assert list(df.columns) == ["name", "elevation", "max_depth"]
+    assert df["name"].tolist() == ["J1", "J2"]
+
+
+def test_encoder_to_dataframe_all_sections():
+    """Test encoding all sections to DataFrame dictionary."""
+    pd = pytest.importorskip("pandas")
+    encoder = SwmmInputEncoder()
+    
+    model = {
+        "junctions": [
+            {"name": "J1", "elevation": 100},
+            {"name": "J2", "elevation": 95},
+        ],
+        "outfalls": [
+            {"name": "O1", "elevation": 80},
+        ],
+        "title": "Test Model",
+    }
+    
+    dfs = encoder.encode_to_dataframe(model)
+    
+    assert isinstance(dfs, dict)
+    assert "junctions" in dfs
+    assert "outfalls" in dfs
+    assert "title" not in dfs  # String sections excluded
+    assert len(dfs["junctions"]) == 2
+    assert len(dfs["outfalls"]) == 1
+
+
+def test_encoder_to_dataframe_empty_section():
+    """Test encoding empty section returns empty DataFrame."""
+    pd = pytest.importorskip("pandas")
+    encoder = SwmmInputEncoder()
+    
+    model = {"junctions": []}
+    
+    df = encoder.encode_to_dataframe(model, section="junctions")
+    
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 0
+
+
+def test_encoder_to_dataframe_nonexistent_section():
+    """Test error when section doesn't exist."""
+    encoder = SwmmInputEncoder()
+    
+    model = {"junctions": []}
+    
+    with pytest.raises(ValueError, match="not found in model"):
+        encoder.encode_to_dataframe(model, section="nonexistent")
+
+
+def test_encoder_to_dataframe_non_list_section():
+    """Test error when section is not a list."""
+    encoder = SwmmInputEncoder()
+    
+    model = {"title": "Test Model"}
+    
+    with pytest.raises(ValueError, match="is not a list"):
+        encoder.encode_to_dataframe(model, section="title")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

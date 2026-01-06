@@ -59,7 +59,7 @@ bump-major:
 	git push origin --tags
 
 example1:
-	python examples/example1/example1.py
+	.venv/bin/python examples/example1/example1.py
 
 example2:
-	python examples/example2/example2.py
+	.venv/bin/python examples/example2/example2.py

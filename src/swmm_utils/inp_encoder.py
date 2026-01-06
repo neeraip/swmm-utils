@@ -108,6 +108,51 @@ class SwmmInputEncoder:
         # Return the JSON string for backwards compatibility
         return json.dumps(model, indent=2 if pretty else None)
 
+    def encode_to_dataframe(
+        self, model: Dict[str, Any], section: Optional[str] = None
+    ):
+        """Encode SWMM model section(s) to Pandas DataFrame(s).
+
+        Args:
+            model: SWMM model dict
+            section: Optional specific section name to convert. If None, returns all sections.
+
+        Returns:
+            Pandas DataFrame if section is specified, or Dict[str, DataFrame] for all sections.
+            Only sections with list data (junctions, conduits, etc.) are included.
+        """
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            raise ImportError(
+                "pandas is required for DataFrame support. "
+                "Install with: pip install pandas"
+            ) from exc
+
+        if section:
+            # Return single dataframe for specified section
+            if section not in model:
+                raise ValueError(f"Section '{section}' not found in model")
+
+            section_data = model[section]
+            if isinstance(section_data, list):
+                # Both non-empty and empty lists return DataFrame
+                return pd.DataFrame(section_data)
+            # Non-list section cannot be converted to DataFrame
+            raise ValueError(
+                f"Section '{section}' is not a list and cannot be converted to DataFrame"
+            )
+
+        # Return dict of dataframes for all sections with list data
+        dataframes = {}
+        for section_name, section_data in model.items():
+            if isinstance(section_data, list) and len(section_data) > 0:
+                dataframes[section_name] = pd.DataFrame(section_data)
+            elif isinstance(section_data, list):
+                # Include empty dataframes
+                dataframes[section_name] = pd.DataFrame()
+        return dataframes
+
     def encode_to_parquet(
         self, model: Dict[str, Any], output_path: str, single_file: bool = False
     ):
