@@ -19,7 +19,7 @@ from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 SAMPLE_INP = """
 [TITLE]
 Test SWMM Model
-Simple test model for parser validation
+Simple test model for decoder validation
 
 [OPTIONS]
 FLOW_UNITS           CFS
@@ -94,20 +94,20 @@ S1               50.0               150.0
 
 @pytest.fixture
 def sample_model():
-    """Parse the sample input and return the model."""
-    parser = SwmmInputDecoder()
-    model = parser.decode(StringIO(SAMPLE_INP))
+    """Decode the sample input and return the model."""
+    decoder = SwmmInputDecoder()
+    model = decoder.decode(StringIO(SAMPLE_INP))
     return model
 
 
-def test_parser_title(sample_model):
-    """Test parsing of [TITLE] section."""
+def test_decoder_title(sample_model):
+    """Test decoding of [TITLE] section."""
     assert "title" in sample_model
     assert "Test SWMM Model" in sample_model["title"]
 
 
-def test_parser_options(sample_model):
-    """Test parsing of [OPTIONS] section."""
+def test_decoder_options(sample_model):
+    """Test decoding of [OPTIONS] section."""
     assert "options" in sample_model
     options = sample_model["options"]
     assert options["FLOW_UNITS"] == "CFS"
@@ -115,8 +115,8 @@ def test_parser_options(sample_model):
     assert options["FLOW_ROUTING"] == "DYNWAVE"
 
 
-def test_parser_raingages(sample_model):
-    """Test parsing of [RAINGAGES] section."""
+def test_decoder_raingages(sample_model):
+    """Test decoding of [RAINGAGES] section."""
     assert "raingages" in sample_model
     assert len(sample_model["raingages"]) == 1
     gage = sample_model["raingages"][0]
@@ -125,8 +125,8 @@ def test_parser_raingages(sample_model):
     assert gage["interval"] == "1:00"
 
 
-def test_parser_subcatchments(sample_model):
-    """Test parsing of [SUBCATCHMENTS] section."""
+def test_decoder_subcatchments(sample_model):
+    """Test decoding of [SUBCATCHMENTS] section."""
     assert "subcatchments" in sample_model
     assert len(sample_model["subcatchments"]) == 1
     sub = sample_model["subcatchments"][0]
@@ -135,8 +135,8 @@ def test_parser_subcatchments(sample_model):
     assert sub["imperv"] == "25.0"
 
 
-def test_parser_junctions(sample_model):
-    """Test parsing of [JUNCTIONS] section."""
+def test_decoder_junctions(sample_model):
+    """Test decoding of [JUNCTIONS] section."""
     assert "junctions" in sample_model
     assert len(sample_model["junctions"]) == 2
     j1 = sample_model["junctions"][0]
@@ -145,8 +145,8 @@ def test_parser_junctions(sample_model):
     assert j1["max_depth"] == "15.0"
 
 
-def test_parser_outfalls(sample_model):
-    """Test parsing of [OUTFALLS] section."""
+def test_decoder_outfalls(sample_model):
+    """Test decoding of [OUTFALLS] section."""
     assert "outfalls" in sample_model
     assert len(sample_model["outfalls"]) == 1
     out = sample_model["outfalls"][0]
@@ -154,8 +154,8 @@ def test_parser_outfalls(sample_model):
     assert out["type"] == "FREE"
 
 
-def test_parser_conduits(sample_model):
-    """Test parsing of [CONDUITS] section."""
+def test_decoder_conduits(sample_model):
+    """Test decoding of [CONDUITS] section."""
     assert "conduits" in sample_model
     assert len(sample_model["conduits"]) == 2
     c1 = sample_model["conduits"][0]
@@ -164,8 +164,8 @@ def test_parser_conduits(sample_model):
     assert c1["to_node"] == "J2"
 
 
-def test_parser_xsections(sample_model):
-    """Test parsing of [XSECTIONS] section."""
+def test_decoder_xsections(sample_model):
+    """Test decoding of [XSECTIONS] section."""
     assert "xsections" in sample_model
     assert len(sample_model["xsections"]) == 2
     xs = sample_model["xsections"][0]
@@ -173,8 +173,8 @@ def test_parser_xsections(sample_model):
     assert xs["shape"] == "CIRCULAR"
 
 
-def test_parser_timeseries(sample_model):
-    """Test parsing of [TIMESERIES] section."""
+def test_decoder_timeseries(sample_model):
+    """Test decoding of [TIMESERIES] section."""
     assert "timeseries" in sample_model
     assert "TS1" in sample_model["timeseries"]
     ts = sample_model["timeseries"]["TS1"]
@@ -183,8 +183,8 @@ def test_parser_timeseries(sample_model):
     assert ts[0]["value"] == "0.0"
 
 
-def test_parser_coordinates(sample_model):
-    """Test parsing of [COORDINATES] section."""
+def test_decoder_coordinates(sample_model):
+    """Test decoding of [COORDINATES] section."""
     assert "coordinates" in sample_model
     assert len(sample_model["coordinates"]) == 3
 
@@ -205,12 +205,12 @@ def test_converter_json(sample_model, tmp_path):
     assert model_from_json["options"]["FLOW_UNITS"] == "CFS"
 
 
-def test_unparser(sample_model, tmp_path):
-    """Test unparsing back to .inp format."""
-    unparser = SwmmInputEncoder()
+def test_encoder_writes_inp(sample_model, tmp_path):
+    """Test encoding to .inp file."""
+    encoder = SwmmInputEncoder()
 
     output_file = tmp_path / "test_output.inp"
-    unparser.encode_to_inp_file(sample_model, str(output_file))
+    encoder.encode_to_inp_file(sample_model, str(output_file))
 
     assert output_file.exists()
 
@@ -223,19 +223,19 @@ def test_unparser(sample_model, tmp_path):
 
 
 def test_roundtrip(tmp_path):
-    """Test full round-trip: parse → unparse → parse."""
-    parser = SwmmInputDecoder()
-    unparser = SwmmInputEncoder()
+    """Test full round-trip: decode → encode → decode."""
+    decoder = SwmmInputDecoder()
+    encoder = SwmmInputEncoder()
 
-    # Parse original
-    model1 = parser.decode(StringIO(SAMPLE_INP))
+    # Decode original
+    model1 = decoder.decode(StringIO(SAMPLE_INP))
 
-    # Unparse to file
+    # Encode to file
     temp_file = tmp_path / "roundtrip.inp"
-    unparser.encode_to_inp_file(model1, str(temp_file))
+    encoder.encode_to_inp_file(model1, str(temp_file))
 
-    # Parse again
-    model2 = parser.decode_file(str(temp_file))
+    # Decode again
+    model2 = decoder.decode_file(str(temp_file))
 
     # Compare key sections
     assert model1["options"]["FLOW_UNITS"] == model2["options"]["FLOW_UNITS"]
@@ -243,8 +243,8 @@ def test_roundtrip(tmp_path):
     assert len(model1["conduits"]) == len(model2["conduits"])
 
 
-def test_parser_comments_and_whitespace():
-    """Test that parser handles comments and whitespace correctly."""
+def test_decoder_comments_and_whitespace():
+    """Test that decoder handles comments and whitespace correctly."""
     inp_with_comments = """
 [TITLE]
 ;; This is a comment
@@ -262,16 +262,16 @@ J1    100.0    15.0    0    0    0
 J2    95.0     15.0    0    0    0  ; inline
 """
 
-    parser = SwmmInputDecoder()
-    model = parser.decode(StringIO(inp_with_comments))
+    decoder = SwmmInputDecoder()
+    model = decoder.decode(StringIO(inp_with_comments))
 
     assert "title" in model
     assert "Test Model" in model["title"]
     assert len(model["junctions"]) == 2
 
 
-def test_parser_empty_sections():
-    """Test parser with minimal input."""
+def test_decoder_empty_sections():
+    """Test decoder with minimal input."""
     minimal_inp = """
 [TITLE]
 Minimal Model
@@ -280,8 +280,8 @@ Minimal Model
 FLOW_UNITS    CFS
 """
 
-    parser = SwmmInputDecoder()
-    model = parser.decode(StringIO(minimal_inp))
+    decoder = SwmmInputDecoder()
+    model = decoder.decode(StringIO(minimal_inp))
 
     assert "title" in model
     assert "options" in model
