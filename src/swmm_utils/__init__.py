@@ -8,7 +8,7 @@ This package provides tools to:
 - Validate SWMM models
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 from .inp_decoder import SwmmInputDecoder
 from .inp_encoder import SwmmInputEncoder
