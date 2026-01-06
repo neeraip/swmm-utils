@@ -1,7 +1,6 @@
-"""Test SWMM .inp file decoder and encoder (low-level API).
+"""Test SWMM .inp file encoder (low-level API).
 
-Tests the SwmmInputDecoder and SwmmInputEncoder classes for parsing
-and generating .inp files.
+Tests the SwmmInputEncoder class for generating .inp files.
 """
 
 import pytest
@@ -100,95 +99,6 @@ def sample_model():
     return model
 
 
-def test_decoder_title(sample_model):
-    """Test decoding of [TITLE] section."""
-    assert "title" in sample_model
-    assert "Test SWMM Model" in sample_model["title"]
-
-
-def test_decoder_options(sample_model):
-    """Test decoding of [OPTIONS] section."""
-    assert "options" in sample_model
-    options = sample_model["options"]
-    assert options["FLOW_UNITS"] == "CFS"
-    assert options["INFILTRATION"] == "HORTON"
-    assert options["FLOW_ROUTING"] == "DYNWAVE"
-
-
-def test_decoder_raingages(sample_model):
-    """Test decoding of [RAINGAGES] section."""
-    assert "raingages" in sample_model
-    assert len(sample_model["raingages"]) == 1
-    gage = sample_model["raingages"][0]
-    assert gage["name"] == "RG1"
-    assert gage["format"] == "INTENSITY"
-    assert gage["interval"] == "1:00"
-
-
-def test_decoder_subcatchments(sample_model):
-    """Test decoding of [SUBCATCHMENTS] section."""
-    assert "subcatchments" in sample_model
-    assert len(sample_model["subcatchments"]) == 1
-    sub = sample_model["subcatchments"][0]
-    assert sub["name"] == "S1"
-    assert sub["area"] == "5.0"
-    assert sub["imperv"] == "25.0"
-
-
-def test_decoder_junctions(sample_model):
-    """Test decoding of [JUNCTIONS] section."""
-    assert "junctions" in sample_model
-    assert len(sample_model["junctions"]) == 2
-    j1 = sample_model["junctions"][0]
-    assert j1["name"] == "J1"
-    assert j1["elevation"] == "100.0"
-    assert j1["max_depth"] == "15.0"
-
-
-def test_decoder_outfalls(sample_model):
-    """Test decoding of [OUTFALLS] section."""
-    assert "outfalls" in sample_model
-    assert len(sample_model["outfalls"]) == 1
-    out = sample_model["outfalls"][0]
-    assert out["name"] == "OUT1"
-    assert out["type"] == "FREE"
-
-
-def test_decoder_conduits(sample_model):
-    """Test decoding of [CONDUITS] section."""
-    assert "conduits" in sample_model
-    assert len(sample_model["conduits"]) == 2
-    c1 = sample_model["conduits"][0]
-    assert c1["name"] == "C1"
-    assert c1["from_node"] == "J1"
-    assert c1["to_node"] == "J2"
-
-
-def test_decoder_xsections(sample_model):
-    """Test decoding of [XSECTIONS] section."""
-    assert "xsections" in sample_model
-    assert len(sample_model["xsections"]) == 2
-    xs = sample_model["xsections"][0]
-    assert xs["link"] == "C1"
-    assert xs["shape"] == "CIRCULAR"
-
-
-def test_decoder_timeseries(sample_model):
-    """Test decoding of [TIMESERIES] section."""
-    assert "timeseries" in sample_model
-    assert "TS1" in sample_model["timeseries"]
-    ts = sample_model["timeseries"]["TS1"]
-    assert len(ts) == 3
-    assert ts[0]["time"] == "0:00"
-    assert ts[0]["value"] == "0.0"
-
-
-def test_decoder_coordinates(sample_model):
-    """Test decoding of [COORDINATES] section."""
-    assert "coordinates" in sample_model
-    assert len(sample_model["coordinates"]) == 3
-
-
 def test_converter_json(sample_model, tmp_path):
     """Test JSON conversion."""
     converter = SwmmInputEncoder()
@@ -241,51 +151,6 @@ def test_roundtrip(tmp_path):
     assert model1["options"]["FLOW_UNITS"] == model2["options"]["FLOW_UNITS"]
     assert len(model1["junctions"]) == len(model2["junctions"])
     assert len(model1["conduits"]) == len(model2["conduits"])
-
-
-def test_decoder_comments_and_whitespace():
-    """Test that decoder handles comments and whitespace correctly."""
-    inp_with_comments = """
-[TITLE]
-;; This is a comment
-Test Model
-
-[OPTIONS]
-FLOW_UNITS    CFS  ; inline comment
-  ; Another comment
-INFILTRATION  HORTON
-
-[JUNCTIONS]
-;; Junction data
-J1    100.0    15.0    0    0    0
-; Comment line
-J2    95.0     15.0    0    0    0  ; inline
-"""
-
-    decoder = SwmmInputDecoder()
-    model = decoder.decode(StringIO(inp_with_comments))
-
-    assert "title" in model
-    assert "Test Model" in model["title"]
-    assert len(model["junctions"]) == 2
-
-
-def test_decoder_empty_sections():
-    """Test decoder with minimal input."""
-    minimal_inp = """
-[TITLE]
-Minimal Model
-
-[OPTIONS]
-FLOW_UNITS    CFS
-"""
-
-    decoder = SwmmInputDecoder()
-    model = decoder.decode(StringIO(minimal_inp))
-
-    assert "title" in model
-    assert "options" in model
-    assert model["options"]["FLOW_UNITS"] == "CFS"
 
 
 if __name__ == "__main__":
