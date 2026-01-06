@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
     # Extract description from first non-header line
     lines = long_description.split("\n")
-    description = None
+    description = "EPA SWMM utility library"
     for line in lines:
         line = line.strip()
         if line and not line.startswith("#"):
