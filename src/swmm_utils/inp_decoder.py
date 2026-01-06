@@ -746,3 +746,159 @@ class SwmmInputDecoder:
                     entry["patterns"] = parts[3:]
                 dwf.append(entry)
         model["dwf"] = dwf
+
+    def _parse_pollutants(self, model: dict, data: List[str]):
+        """Parse [POLLUTANTS] section."""
+        pollutants = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 1:
+                pollutant = {"name": parts[0]}
+                if len(parts) > 1:
+                    pollutant["units"] = parts[1]
+                if len(parts) > 2:
+                    pollutant["crain"] = parts[2]
+                if len(parts) > 3:
+                    pollutant["cgw"] = parts[3]
+                if len(parts) > 4:
+                    pollutant["crdii"] = parts[4]
+                if len(parts) > 5:
+                    pollutant["kdecay"] = parts[5]
+                if len(parts) > 6:
+                    pollutant["snow_only"] = parts[6]
+                pollutants.append(pollutant)
+        model["pollutants"] = pollutants
+
+    def _parse_landuses(self, model: dict, data: List[str]):
+        """Parse [LANDUSES] section."""
+        landuses = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 1:
+                landuse = {"name": parts[0]}
+                if len(parts) > 1:
+                    landuse["percent_imperv"] = parts[1]
+                landuses.append(landuse)
+        model["landuses"] = landuses
+
+    def _parse_coverages(self, model: dict, data: List[str]):
+        """Parse [COVERAGES] section."""
+        coverages = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 3:
+                coverage = {
+                    "subcatchment": parts[0],
+                    "landuse": parts[1],
+                    "percent": parts[2],
+                }
+                coverages.append(coverage)
+        model["coverages"] = coverages
+
+    def _parse_buildup(self, model: dict, data: List[str]):
+        """Parse [BUILDUP] section."""
+        buildup = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 4:
+                entry: Dict[str, Any] = {
+                    "landuse": parts[0],
+                    "pollutant": parts[1],
+                    "function": parts[2],
+                    "coeff1": parts[3],
+                }
+                if len(parts) > 4:
+                    entry["coeff2"] = parts[4]
+                if len(parts) > 5:
+                    entry["coeff3"] = parts[5]
+                buildup.append(entry)
+        model["buildup"] = buildup
+
+    def _parse_washoff(self, model: dict, data: List[str]):
+        """Parse [WASHOFF] section."""
+        washoff = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 4:
+                entry: Dict[str, Any] = {
+                    "landuse": parts[0],
+                    "pollutant": parts[1],
+                    "function": parts[2],
+                    "coeff1": parts[3],
+                }
+                if len(parts) > 4:
+                    entry["coeff2"] = parts[4]
+                if len(parts) > 5:
+                    entry["coeff3"] = parts[5]
+                if len(parts) > 6:
+                    entry["sweeping"] = parts[6]
+                washoff.append(entry)
+        model["washoff"] = washoff
+
+    def _parse_lid_controls(self, model: dict, data: List[str]):
+        """Parse [LID_CONTROLS] section."""
+        lid_controls = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 2:
+                entry: Dict[str, Any] = {
+                    "name": parts[0],
+                    "type": parts[1],
+                }
+                if len(parts) > 2:
+                    entry["params"] = " ".join(parts[2:])
+                lid_controls.append(entry)
+        model["lid_controls"] = lid_controls
+
+    def _parse_lid_usage(self, model: dict, data: List[str]):
+        """Parse [LID_USAGE] section."""
+        lid_usage = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 3:
+                entry: Dict[str, Any] = {
+                    "subcatchment": parts[0],
+                    "lid_control": parts[1],
+                    "number": parts[2],
+                }
+                if len(parts) > 3:
+                    entry["area"] = parts[3]
+                if len(parts) > 4:
+                    entry["width"] = parts[4]
+                if len(parts) > 5:
+                    entry["init_saturation"] = parts[5]
+                if len(parts) > 6:
+                    entry["from_impervious"] = parts[6]
+                if len(parts) > 7:
+                    entry["to_pervious"] = parts[7]
+                lid_usage.append(entry)
+        model["lid_usage"] = lid_usage
+
+    def _parse_files(self, model: dict, data: List[str]):
+        """Parse [FILES] section."""
+        files = {}
+        for line in data:
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                key, value = parts
+                files[key] = value
+        model["files"] = files
+
+    def _parse_hydrographs(self, model: dict, data: List[str]):
+        """Parse [HYDROGRAPHS] section (not supported - store as-is)."""
+        model["hydrographs"] = "\n".join(data)
+
+    def _parse_rdii(self, model: dict, data: List[str]):
+        """Parse [RDII] section."""
+        rdii = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 4:
+                entry: Dict[str, Any] = {
+                    "node": parts[0],
+                    "unithydrograph": parts[1],
+                    "sewer_area": parts[2],
+                    "factor": parts[3],
+                }
+                rdii.append(entry)
+        model["rdii"] = rdii

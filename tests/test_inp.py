@@ -308,6 +308,94 @@ def test_input_setter_landuses():
         assert len(inp.landuses) == 1
 
 
+def test_input_setter_coverages():
+    """Test coverages property setter."""
+    with SwmmInput() as inp:
+        coverages = [
+            {"subcatchment": "S1", "landuse": "LAND1", "percent": 100},
+        ]
+        inp.coverages = coverages
+        assert inp.coverages == coverages
+        assert len(inp.coverages) == 1
+
+
+def test_input_setter_buildup():
+    """Test buildup property setter."""
+    with SwmmInput() as inp:
+        buildup = [
+            {"landuse": "LAND1", "pollutant": "POL1", "func_type": "LINEAR", "coeff": 10},
+        ]
+        inp.buildup = buildup
+        assert inp.buildup == buildup
+        assert len(inp.buildup) == 1
+
+
+def test_input_setter_washoff():
+    """Test washoff property setter."""
+    with SwmmInput() as inp:
+        washoff = [
+            {"landuse": "LAND1", "pollutant": "POL1", "func_type": "EMC", "coeff": 5},
+        ]
+        inp.washoff = washoff
+        assert inp.washoff == washoff
+        assert len(inp.washoff) == 1
+
+
+def test_input_setter_lid_controls():
+    """Test lid_controls property setter."""
+    with SwmmInput() as inp:
+        lid_controls = [
+            {"name": "LID1", "type": "BC", "surface_layer": ""},
+        ]
+        inp.lid_controls = lid_controls
+        assert inp.lid_controls == lid_controls
+        assert len(inp.lid_controls) == 1
+
+
+def test_input_setter_lid_usage():
+    """Test lid_usage property setter."""
+    with SwmmInput() as inp:
+        lid_usage = [
+            {"subcatchment": "S1", "lid_control": "LID1", "number": 1},
+        ]
+        inp.lid_usage = lid_usage
+        assert inp.lid_usage == lid_usage
+        assert len(inp.lid_usage) == 1
+
+
+def test_input_setter_files():
+    """Test files property setter."""
+    with SwmmInput() as inp:
+        files = [
+            {"type": "RAINFALL", "file": "/path/to/rain.dat"},
+        ]
+        inp.files = files
+        assert inp.files == files
+        assert len(inp.files) == 1
+
+
+def test_input_setter_hydrographs():
+    """Test hydrographs property setter."""
+    with SwmmInput() as inp:
+        hydrographs = [
+            {"name": "UH1", "data": "1 0.5 0.3 0.2"},
+        ]
+        inp.hydrographs = hydrographs
+        assert inp.hydrographs == hydrographs
+        assert len(inp.hydrographs) == 1
+
+
+def test_input_setter_rdii():
+    """Test rdii property setter."""
+    with SwmmInput() as inp:
+        rdii = [
+            {"node": "J1", "unithydrograph": "UH1", "sewerfrac": 0.5},
+        ]
+        inp.rdii = rdii
+        assert inp.rdii == rdii
+        assert len(inp.rdii) == 1
+
+
 # ============================================================================
 # DICTIONARY-LIKE INTERFACE TESTS
 # ============================================================================

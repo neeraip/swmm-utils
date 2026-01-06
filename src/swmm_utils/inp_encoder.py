@@ -72,6 +72,16 @@ class SwmmInputEncoder:
         self._write_controls(model, file)
         self._write_inflows(model, file)
         self._write_dwf(model, file)
+        self._write_pollutants(model, file)
+        self._write_landuses(model, file)
+        self._write_coverages(model, file)
+        self._write_buildup(model, file)
+        self._write_washoff(model, file)
+        self._write_lid_controls(model, file)
+        self._write_lid_usage(model, file)
+        self._write_files(model, file)
+        self._write_hydrographs(model, file)
+        self._write_rdii(model, file)
         self._write_timeseries(model, file)
         self._write_patterns(model, file)
         self._write_curves(model, file)
@@ -931,3 +941,157 @@ class SwmmInputEncoder:
                 patterns = " ".join(entry.get("patterns", []))
 
                 file.write(f"{node:<16} {constituent:<16} {baseline:<10} {patterns}\n")
+
+    def _write_pollutants(self, model: Dict[str, Any], file: TextIO):
+        """Write [POLLUTANTS] section."""
+        if "pollutants" in model and model["pollutants"]:
+            self._write_section_header(file, "POLLUTANTS")
+            file.write(";;Name           Units    CRain    CGW      CRDII    KDecay   SnowOnly\n")
+
+            for pollutant in model["pollutants"]:
+                name = self._get_field(pollutant, "name")
+                units = self._get_field(pollutant, "units", default="")
+                crain = self._get_field(pollutant, "crain", default="0")
+                cgw = self._get_field(pollutant, "cgw", default="0")
+                crdii = self._get_field(pollutant, "crdii", default="0")
+                kdecay = self._get_field(pollutant, "kdecay", default="0")
+                snow_only = self._get_field(pollutant, "snow_only", default="NO")
+
+                file.write(
+                    f"{name:<16} {units:<8} {crain:<8} {cgw:<8} "
+                    f"{crdii:<8} {kdecay:<8} {snow_only}\n"
+                )
+
+    def _write_landuses(self, model: Dict[str, Any], file: TextIO):
+        """Write [LANDUSES] section."""
+        if "landuses" in model and model["landuses"]:
+            self._write_section_header(file, "LANDUSES")
+            file.write(";;Name           PctImperv\n")
+
+            for landuse in model["landuses"]:
+                name = self._get_field(landuse, "name")
+                percent_imperv = self._get_field(landuse, "percent_imperv", default="0")
+
+                file.write(f"{name:<16} {percent_imperv}\n")
+
+    def _write_coverages(self, model: Dict[str, Any], file: TextIO):
+        """Write [COVERAGES] section."""
+        if "coverages" in model and model["coverages"]:
+            self._write_section_header(file, "COVERAGES")
+            file.write(";;Subcatchment   LandUse          Percent\n")
+
+            for coverage in model["coverages"]:
+                subcatchment = self._get_field(coverage, "subcatchment")
+                landuse = self._get_field(coverage, "landuse")
+                percent = self._get_field(coverage, "percent", default="0")
+
+                file.write(f"{subcatchment:<16} {landuse:<16} {percent}\n")
+
+    def _write_buildup(self, model: Dict[str, Any], file: TextIO):
+        """Write [BUILDUP] section."""
+        if "buildup" in model and model["buildup"]:
+            self._write_section_header(file, "BUILDUP")
+            file.write(";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3\n")
+
+            for entry in model["buildup"]:
+                landuse = self._get_field(entry, "landuse")
+                pollutant = self._get_field(entry, "pollutant")
+                function = self._get_field(entry, "function", default="NONE")
+                coeff1 = self._get_field(entry, "coeff1", default="0")
+                coeff2 = self._get_field(entry, "coeff2", default="0")
+                coeff3 = self._get_field(entry, "coeff3", default="0")
+
+                file.write(
+                    f"{landuse:<16} {pollutant:<16} {function:<9} "
+                    f"{coeff1:<8} {coeff2:<8} {coeff3}\n"
+                )
+
+    def _write_washoff(self, model: Dict[str, Any], file: TextIO):
+        """Write [WASHOFF] section."""
+        if "washoff" in model and model["washoff"]:
+            self._write_section_header(file, "WASHOFF")
+            file.write(";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3   Sweeping\n")
+
+            for entry in model["washoff"]:
+                landuse = self._get_field(entry, "landuse")
+                pollutant = self._get_field(entry, "pollutant")
+                function = self._get_field(entry, "function", default="NONE")
+                coeff1 = self._get_field(entry, "coeff1", default="0")
+                coeff2 = self._get_field(entry, "coeff2", default="0")
+                coeff3 = self._get_field(entry, "coeff3", default="0")
+                sweeping = self._get_field(entry, "sweeping", default="0")
+
+                file.write(
+                    f"{landuse:<16} {pollutant:<16} {function:<9} "
+                    f"{coeff1:<8} {coeff2:<8} {coeff3:<8} {sweeping}\n"
+                )
+
+    def _write_lid_controls(self, model: Dict[str, Any], file: TextIO):
+        """Write [LID_CONTROLS] section."""
+        if "lid_controls" in model and model["lid_controls"]:
+            self._write_section_header(file, "LID_CONTROLS")
+            file.write(";;Name           Type             Parameters\n")
+
+            for entry in model["lid_controls"]:
+                name = self._get_field(entry, "name")
+                lid_type = self._get_field(entry, "type")
+                params = self._get_field(entry, "params", default="")
+
+                file.write(f"{name:<16} {lid_type:<16} {params}\n")
+
+    def _write_lid_usage(self, model: Dict[str, Any], file: TextIO):
+        """Write [LID_USAGE] section."""
+        if "lid_usage" in model and model["lid_usage"]:
+            self._write_section_header(file, "LID_USAGE")
+            file.write(
+                ";;Subcatchment   LID_Control      Number   Area     Width    InitSat  FromImp  ToPerv\n"
+            )
+
+            for entry in model["lid_usage"]:
+                subcatchment = self._get_field(entry, "subcatchment")
+                lid_control = self._get_field(entry, "lid_control")
+                number = self._get_field(entry, "number", default="1")
+                area = self._get_field(entry, "area", default="0")
+                width = self._get_field(entry, "width", default="0")
+                init_saturation = self._get_field(entry, "init_saturation", default="0")
+                from_impervious = self._get_field(entry, "from_impervious", default="0")
+                to_pervious = self._get_field(entry, "to_pervious", default="0")
+
+                file.write(
+                    f"{subcatchment:<16} {lid_control:<16} {number:<8} "
+                    f"{area:<8} {width:<8} {init_saturation:<8} "
+                    f"{from_impervious:<8} {to_pervious}\n"
+                )
+
+    def _write_files(self, model: Dict[str, Any], file: TextIO):
+        """Write [FILES] section."""
+        if "files" in model and model["files"]:
+            self._write_section_header(file, "FILES")
+
+            for key, value in model["files"].items():
+                file.write(f"{key:<20} {value}\n")
+
+    def _write_hydrographs(self, model: Dict[str, Any], file: TextIO):
+        """Write [HYDROGRAPHS] section."""
+        if "hydrographs" in model and model["hydrographs"]:
+            self._write_section_header(file, "HYDROGRAPHS")
+            hydrographs_data = model["hydrographs"]
+            if isinstance(hydrographs_data, str):
+                file.write(hydrographs_data)
+            else:
+                for entry in hydrographs_data:
+                    file.write(f"{entry}\n")
+
+    def _write_rdii(self, model: Dict[str, Any], file: TextIO):
+        """Write [RDII] section."""
+        if "rdii" in model and model["rdii"]:
+            self._write_section_header(file, "RDII")
+            file.write(";;Node           UnitHydrograph  SewerArea Factor\n")
+
+            for entry in model["rdii"]:
+                node = self._get_field(entry, "node")
+                unithydrograph = self._get_field(entry, "unithydrograph")
+                sewer_area = self._get_field(entry, "sewer_area", default="0")
+                factor = self._get_field(entry, "factor", default="1")
+
+                file.write(f"{node:<16} {unithydrograph:<16} {sewer_area:<8} {factor}\n")
