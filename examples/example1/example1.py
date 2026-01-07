@@ -297,28 +297,32 @@ def main():
 
                 # Section-level export (links only)
                 print("\n      Level 2: Section export (links only)")
-                links_section_df = out_with_ts.to_dataframe("links")
-                print(
-                    f"      ✓ Links section: {links_section_df.shape[0]} row(s), {links_section_df.shape[1]} column(s)"
-                )
-                if len(links_section_df) > 0:
+                links_section_data = out_with_ts.to_dataframe("links")
+                links_section_df = links_section_data.get("links")
+                if links_section_df is not None:
                     print(
-                        f"      ✓ Index levels: {links_section_df.index.names}"
+                        f"      ✓ Links section: {links_section_df.shape[0]} row(s), {links_section_df.shape[1]} column(s)"
                     )
-                    print("      Sample data (first 3 rows):")
-                    print(links_section_df.head(3).to_string())
+                    if len(links_section_df) > 0:
+                        print(
+                            f"      ✓ Index levels: {links_section_df.index.names}"
+                        )
+                        print("      Sample data (first 3 rows):")
+                        print(links_section_df.head(3).to_string())
 
                 # Single-element export (first link)
                 if out_with_ts.n_links > 0:
                     first_link = out_with_ts.link_labels[0]
                     print(f"\n      Level 3: Single element export ({first_link})")
-                    link_ts_df = out_with_ts.to_dataframe("links", first_link)
-                    print(
-                        f"      ✓ Single link time series: {link_ts_df.shape[0]} row(s), {link_ts_df.shape[1]} column(s)"
-                    )
-                    print(f"      ✓ Time period: {link_ts_df.index.min()} to {link_ts_df.index.max()}")
-                    print("      Sample data (first 3 timesteps):")
-                    print(link_ts_df.head(3).to_string())
+                    link_ts_data = out_with_ts.to_dataframe("links", first_link)
+                    link_ts_df = link_ts_data.get("links")
+                    if link_ts_df is not None:
+                        print(
+                            f"      ✓ Single link time series: {link_ts_df.shape[0]} row(s), {link_ts_df.shape[1]} column(s)"
+                        )
+                        print(f"      ✓ Time period: {link_ts_df.index.min()} to {link_ts_df.index.max()}")
+                        print("      Sample data (first 3 timesteps):")
+                        print(link_ts_df.head(3).to_string())
 
             except ImportError:
                 print("      ⚠ pandas not installed, skipping DataFrame export")

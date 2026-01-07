@@ -297,7 +297,8 @@ def main():
 
                 # Section-level export (links only)
                 print("\n      Level 2: Section export (links only)")
-                links_section_df = out_with_ts.to_dataframe("links")
+                links_section_dict = out_with_ts.to_dataframe("links")
+                links_section_df = links_section_dict["links"]
                 print(
                     f"      ✓ Links section: {links_section_df.shape[0]} row(s), {links_section_df.shape[1]} column(s)"
                 )
@@ -312,7 +313,8 @@ def main():
                 if out_with_ts.n_links > 0:
                     first_link = out_with_ts.link_labels[0]
                     print(f"\n      Level 3: Single element export ({first_link})")
-                    link_ts_df = out_with_ts.to_dataframe("links", first_link)
+                    link_ts_dict = out_with_ts.to_dataframe("links", first_link)
+                    link_ts_df = link_ts_dict["links"]
                     print(
                         f"      ✓ Single link time series: {link_ts_df.shape[0]} row(s), {link_ts_df.shape[1]} column(s)"
                     )
