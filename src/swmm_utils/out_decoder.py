@@ -137,16 +137,18 @@ class SwmmOutputDecoder:
         n_system_vars = metadata["variables"]["system"]
 
         # Calculate total record size in bytes
-        record_size = (
+        # Each record starts with 8-byte timestamp (double) followed by data
+        record_size = 8 + (  # 8 bytes for timestamp
             n_subcatch * n_subcatch_vars
             + n_nodes * n_node_vars
             + n_links * n_link_vars
             + n_system_vars
         ) * 4
 
-        # Find the start of time series data
-        # It's after the metadata section, which we've already read past
-        current_pos = f.tell()
+        # Find the start of time series data from the footer
+        f.seek(-6 * self._RECORD_SIZE, 2)
+        footer = self._read_n_ints(f, 6)
+        results_pos = footer[2]
 
         # Initialize storage for time series
         time_series = {
@@ -168,7 +170,8 @@ class SwmmOutputDecoder:
 
         # Read all time step records
         for period in range(n_periods):
-            f.seek(current_pos + period * record_size)
+            # Seek to start of record, then skip the 8-byte timestamp
+            f.seek(results_pos + period * record_size + 8)
 
             # Read subcatchment data
             for subcatch_label in metadata["labels"]["subcatchment"]:
@@ -246,15 +249,37 @@ class SwmmOutputDecoder:
         )
 
         # Read number of variables for each object type
+        # Each type has: count (int) followed by count variable codes (ints)
+        num_subcatch_vars = self._read_int(f)
+        subcatch_var_codes = self._read_n_ints(f, num_subcatch_vars)
+        
+        num_node_vars = self._read_int(f)
+        node_var_codes = self._read_n_ints(f, num_node_vars)
+        
+        num_link_vars = self._read_int(f)
+        link_var_codes = self._read_n_ints(f, num_link_vars)
+        
+        num_system_vars = self._read_int(f)
+        system_var_codes = self._read_n_ints(f, num_system_vars)
+        
         variables = {
-            "subcatchment": self._read_int(f),
-            "node": self._read_int(f),
-            "link": self._read_int(f),
-            "system": self._read_int(f),
+            "subcatchment": num_subcatch_vars,
+            "node": num_node_vars,
+            "link": num_link_vars,
+            "system": num_system_vars,
+        }
+        
+        variable_codes = {
+            "subcatchment": subcatch_var_codes,
+            "node": node_var_codes,
+            "link": link_var_codes,
+            "system": system_var_codes,
         }
 
         # Read start date/time and time step info
-        start_date = self._read_datetime(f)
+        # Start date is stored as Excel serial date (double, days since 1899-12-30)
+        start_date_double = self._read_double(f)
+        start_date = self._excel_date_to_datetime(start_date_double)
         report_interval_seconds = self._read_int(f)
         report_interval = timedelta(seconds=report_interval_seconds)
 
@@ -268,6 +293,7 @@ class SwmmOutputDecoder:
             "properties": properties,
             "pollutant_units": pollutant_units,
             "variables": variables,
+            "variable_codes": variable_codes,
             "start_date": start_date,
             "report_interval": report_interval,
             "report_interval_seconds": report_interval_seconds,
@@ -330,17 +356,15 @@ class SwmmOutputDecoder:
                 strings.append("")
         return strings
 
-    def _read_datetime(self, f) -> datetime:
-        """Read a date/time value (5 integers: year, month, day, hour, minute)."""
-        year = self._read_int(f)
-        month = self._read_int(f)
-        day = self._read_int(f)
-        hour = self._read_int(f)
-        minute = self._read_int(f)
-
+    def _excel_date_to_datetime(self, excel_date: float) -> datetime:
+        """Convert Excel serial date to Python datetime.
+        
+        Excel serial dates are days since 1899-12-30.
+        """
         try:
-            return datetime(year, month, day, hour, minute)
-        except ValueError:
+            base = datetime(1899, 12, 30)
+            return base + timedelta(days=excel_date)
+        except (ValueError, OverflowError):
             return datetime(2000, 1, 1, 0, 0)  # Default if invalid
 
     def _create_time_index(

@@ -691,6 +691,42 @@ Tested on diverse simulation results:
 2. **Section Availability**: Not all sections appear in every report (depends on simulation settings)
 3. **Format Variations**: Minor format differences across SWMM versions handled gracefully
 
+## Changelog
+
+### Latest Changes (Feb 2026)
+
+**Output File Parser Bug Fixes:**
+
+Fixed 4 critical bugs in the `.out` file decoder (`out_decoder.py`) that caused incorrect parsing of SWMM binary output files:
+
+1. **Variable counts not reading codes** - The parser read the variable count but didn't skip the variable codes that follow each count. This caused all subsequent reads to be offset.
+   ```python
+   # Before (wrong): read count, then immediately read next count
+   # After (fixed): read count, then read N codes, then read next count
+   ```
+
+2. **Start date format** - Was reading as 5 integers (year, month, day, hour, minute), but SWMM stores it as a double (Excel serial date format, 8 bytes).
+   ```python
+   # Before: self._read_datetime(f)  # Expected 5 ints
+   # After: self._read_double(f)  # Excel serial date (days since 1899-12-30)
+   ```
+
+3. **Record size missing timestamp** - Each time series record starts with an 8-byte timestamp that wasn't included in the record size calculation.
+   ```python
+   # Before: record_size = (n_subcatch * n_subcatch_vars + ...) * 4
+   # After: record_size = 8 + (n_subcatch * n_subcatch_vars + ...) * 4
+   ```
+
+4. **Time series read position** - Used incorrect file position after metadata parsing instead of the correct position from the file footer.
+
+**Impact:** These fixes enable correct parsing of all time series data from `.out` files, including:
+- 6 node variables (depth, head, volume, lateral_inflow, total_inflow, flooding)
+- 5 link variables (flow, depth, velocity, volume, capacity)
+- 15 system variables
+- Correct timestamps
+
+**Added:** Variable codes are now exposed in the metadata (`variable_codes` field) for reference.
+
 ## License
 
 [MIT LICENSE](./LICENSE)
