@@ -9,6 +9,53 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 
 
+def _safe_float(value: str) -> float:
+    """
+    Parse a float from SWMM report output, handling special formatted values.
+
+    SWMM reports use capped display values like '>50.00', '<0.01', or
+    values with asterisks like '***' when results overflow the column width.
+
+    Args:
+        value: String to parse as float
+
+    Returns:
+        Parsed float value
+
+    Raises:
+        ValueError: If the value cannot be parsed at all
+    """
+    s = value.strip()
+
+    # Handle ">N" and "<N" (e.g., ">50.00", "<0.01")
+    if s.startswith(">") or s.startswith("<"):
+        return float(s[1:])
+
+    # Handle asterisk overflow markers (e.g., "***", "****.*")
+    if "*" in s:
+        return float("inf")
+
+    # Handle "NaN", "N/A", "-", or empty
+    lower = s.lower()
+    if lower in ("nan", "n/a", "-", ""):
+        return 0.0
+
+    return float(s)
+
+
+def _safe_int(value: str) -> int:
+    """Parse an int from SWMM report output, handling special values."""
+    s = value.strip()
+    if s.startswith(">") or s.startswith("<"):
+        return int(float(s[1:]))
+    if "*" in s:
+        return 0
+    lower = s.lower()
+    if lower in ("nan", "n/a", "-", ""):
+        return 0
+    return int(s)
+
+
 class SwmmReportDecoder:
     """Decoder for SWMM report (.rpt) files."""
 
@@ -189,7 +236,7 @@ class SwmmReportDecoder:
                 continue
 
             # Match lines like "Total Precipitation ......         8.176         6.655"
-            match = re.match(r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.-]+)\s+([\d.-]+)", line)
+            match = re.match(r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.><*-]+)\s+([\d.><*-]+)", line)
             if match:
                 key = (
                     match.group(1)
@@ -200,8 +247,11 @@ class SwmmReportDecoder:
                     .replace(")", "")
                     .replace("%", "percent")
                 )
-                values = [float(match.group(2)), float(match.group(3))]
-                data[key] = values
+                try:
+                    values = [_safe_float(match.group(2)), _safe_float(match.group(3))]
+                    data[key] = values
+                except ValueError:
+                    continue
 
         return data
 
@@ -237,23 +287,26 @@ class SwmmReportDecoder:
                 # Parse data lines
                 parts = line.split()
                 if len(parts) >= 10:
-                    subcatchments.append(
-                        {
-                            "name": parts[0],
-                            "total_precip": float(parts[1]),
-                            "total_runon": float(parts[2]),
-                            "total_evap": float(parts[3]),
-                            "total_infil": float(parts[4]),
-                            "imperv_runoff": float(parts[5]),
-                            "perv_runoff": float(parts[6]),
-                            "total_runoff": float(parts[7]),
-                            "total_runoff_mgal": float(parts[8]),
-                            "peak_runoff": float(parts[9]),
-                            "runoff_coeff": (
-                                float(parts[10]) if len(parts) > 10 else None
-                            ),
-                        }
-                    )
+                    try:
+                        subcatchments.append(
+                            {
+                                "name": parts[0],
+                                "total_precip": _safe_float(parts[1]),
+                                "total_runon": _safe_float(parts[2]),
+                                "total_evap": _safe_float(parts[3]),
+                                "total_infil": _safe_float(parts[4]),
+                                "imperv_runoff": _safe_float(parts[5]),
+                                "perv_runoff": _safe_float(parts[6]),
+                                "total_runoff": _safe_float(parts[7]),
+                                "total_runoff_mgal": _safe_float(parts[8]),
+                                "peak_runoff": _safe_float(parts[9]),
+                                "runoff_coeff": (
+                                    _safe_float(parts[10]) if len(parts) > 10 else None
+                                ),
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
 
         return subcatchments
 
@@ -282,20 +335,23 @@ class SwmmReportDecoder:
 
                 parts = line.split()
                 if len(parts) >= 7:
-                    nodes.append(
-                        {
-                            "name": parts[0],
-                            "type": parts[1],
-                            "average_depth": float(parts[2]),
-                            "maximum_depth": float(parts[3]),
-                            "maximum_hgl": float(parts[4]),
-                            "time_of_max_days": int(parts[5]),
-                            "time_of_max": parts[6],
-                            "reported_max_depth": (
-                                float(parts[7]) if len(parts) > 7 else None
-                            ),
-                        }
-                    )
+                    try:
+                        nodes.append(
+                            {
+                                "name": parts[0],
+                                "type": parts[1],
+                                "average_depth": _safe_float(parts[2]),
+                                "maximum_depth": _safe_float(parts[3]),
+                                "maximum_hgl": _safe_float(parts[4]),
+                                "time_of_max_days": _safe_int(parts[5]),
+                                "time_of_max": parts[6],
+                                "reported_max_depth": (
+                                    _safe_float(parts[7]) if len(parts) > 7 else None
+                                ),
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
 
         return nodes
 
@@ -324,21 +380,24 @@ class SwmmReportDecoder:
 
                 parts = line.split()
                 if len(parts) >= 10:
-                    nodes.append(
-                        {
-                            "name": parts[0],
-                            "type": parts[1],
-                            "maximum_lateral_inflow": float(parts[2]),
-                            "maximum_total_inflow": float(parts[3]),
-                            "time_of_max_days": int(parts[4]),
-                            "time_of_max": parts[5],
-                            "lateral_inflow_volume": float(parts[6]),
-                            "total_inflow_volume": float(parts[7]),
-                            "flow_balance_error": (
-                                float(parts[8]) if len(parts) > 8 else None
-                            ),
-                        }
-                    )
+                    try:
+                        nodes.append(
+                            {
+                                "name": parts[0],
+                                "type": parts[1],
+                                "maximum_lateral_inflow": _safe_float(parts[2]),
+                                "maximum_total_inflow": _safe_float(parts[3]),
+                                "time_of_max_days": _safe_int(parts[4]),
+                                "time_of_max": parts[5],
+                                "lateral_inflow_volume": _safe_float(parts[6]),
+                                "total_inflow_volume": _safe_float(parts[7]),
+                                "flow_balance_error": (
+                                    _safe_float(parts[8]) if len(parts) > 8 else None
+                                ),
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
 
         return nodes
 
@@ -381,17 +440,19 @@ class SwmmReportDecoder:
 
                 parts = line.split()
                 if len(parts) >= 4 and parts[0] != "System":
-                    outfall = {
-                        "name": parts[0],
-                        "flow_freq": float(parts[1]),
-                        "avg_flow": float(parts[2]),
-                        "max_flow": float(parts[3]),
-                        "total_volume": float(parts[4]) if len(parts) > 4 else None,
-                    }
-                    # Add pollutant loads if present
-                    if len(parts) > 5:
-                        outfall["pollutant_loads"] = [float(p) for p in parts[5:]]
-                    outfalls.append(outfall)
+                    try:
+                        outfall = {
+                            "name": parts[0],
+                            "flow_freq": _safe_float(parts[1]),
+                            "avg_flow": _safe_float(parts[2]),
+                            "max_flow": _safe_float(parts[3]),
+                            "total_volume": _safe_float(parts[4]) if len(parts) > 4 else None,
+                        }
+                        if len(parts) > 5:
+                            outfall["pollutant_loads"] = [_safe_float(p) for p in parts[5:]]
+                        outfalls.append(outfall)
+                    except (ValueError, IndexError):
+                        continue
 
         return outfalls
 
@@ -420,22 +481,25 @@ class SwmmReportDecoder:
 
                 parts = line.split()
                 if len(parts) >= 8:
-                    links.append(
-                        {
-                            "name": parts[0],
-                            "type": parts[1],
-                            "maximum_flow": float(parts[2]),
-                            "time_of_max_days": int(parts[3]),
-                            "time_of_max": parts[4],
-                            "maximum_velocity": float(parts[5]),
-                            "max_over_full_flow": (
-                                float(parts[6]) if len(parts) > 6 else None
-                            ),
-                            "max_over_full_depth": (
-                                float(parts[7]) if len(parts) > 7 else None
-                            ),
-                        }
-                    )
+                    try:
+                        links.append(
+                            {
+                                "name": parts[0],
+                                "type": parts[1],
+                                "maximum_flow": _safe_float(parts[2]),
+                                "time_of_max_days": _safe_int(parts[3]),
+                                "time_of_max": parts[4],
+                                "maximum_velocity": _safe_float(parts[5]),
+                                "max_over_full_flow": (
+                                    _safe_float(parts[6]) if len(parts) > 6 else None
+                                ),
+                                "max_over_full_depth": (
+                                    _safe_float(parts[7]) if len(parts) > 7 else None
+                                ),
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
 
         return links
 
@@ -513,15 +577,15 @@ class SwmmReportDecoder:
                     pumps.append(
                         {
                             "pump_name": parts[0],
-                            "percent_utilized": float(parts[1]),
-                            "num_startups": int(parts[2]),
-                            "min_flow": float(parts[3]),
-                            "avg_flow": float(parts[4]),
-                            "max_flow": float(parts[5]),
-                            "total_volume": float(parts[6]),
-                            "power_usage": float(parts[7]),
-                            "pct_time_off_curve_low": float(parts[8]),
-                            "pct_time_off_curve_high": float(parts[9]),
+                            "percent_utilized": _safe_float(parts[1]),
+                            "num_startups": _safe_int(parts[2]),
+                            "min_flow": _safe_float(parts[3]),
+                            "avg_flow": _safe_float(parts[4]),
+                            "max_flow": _safe_float(parts[5]),
+                            "total_volume": _safe_float(parts[6]),
+                            "power_usage": _safe_float(parts[7]),
+                            "pct_time_off_curve_low": _safe_float(parts[8]),
+                            "pct_time_off_curve_high": _safe_float(parts[9]),
                         }
                     )
                 except (ValueError, IndexError):
@@ -556,15 +620,15 @@ class SwmmReportDecoder:
                     storages.append(
                         {
                             "storage_unit": parts[0],
-                            "avg_volume": float(parts[1]),
-                            "avg_pct_full": float(parts[2]),
-                            "evap_pct_loss": float(parts[3]),
-                            "exfil_pct_loss": float(parts[4]),
-                            "max_volume": float(parts[5]),
-                            "max_pct_full": float(parts[6]),
-                            "time_of_max_days": int(parts[7]),
+                            "avg_volume": _safe_float(parts[1]),
+                            "avg_pct_full": _safe_float(parts[2]),
+                            "evap_pct_loss": _safe_float(parts[3]),
+                            "exfil_pct_loss": _safe_float(parts[4]),
+                            "max_volume": _safe_float(parts[5]),
+                            "max_pct_full": _safe_float(parts[6]),
+                            "time_of_max_days": _safe_int(parts[7]),
                             "time_of_max": parts[8],
-                            "max_outflow": float(parts[9]) if len(parts) > 9 else None,
+                            "max_outflow": _safe_float(parts[9]) if len(parts) > 9 else None,
                         }
                     )
                 except (ValueError, IndexError):
@@ -605,9 +669,9 @@ class SwmmReportDecoder:
                         {
                             "node_name": parts[0],
                             "node_type": parts[1],
-                            "hours_surcharged": float(parts[2]),
-                            "max_height_above_crown": float(parts[3]),
-                            "min_depth_below_rim": float(parts[4]),
+                            "hours_surcharged": _safe_float(parts[2]),
+                            "max_height_above_crown": _safe_float(parts[3]),
+                            "min_depth_below_rim": _safe_float(parts[4]),
                         }
                     )
                 except (ValueError, IndexError):
@@ -643,14 +707,14 @@ class SwmmReportDecoder:
                         {
                             "subcatchment": parts[0],
                             "lid_control": parts[1],
-                            "total_inflow": float(parts[2]),
-                            "evap_loss": float(parts[3]),
-                            "infil_loss": float(parts[4]),
-                            "surface_outflow": float(parts[5]),
-                            "drain_outflow": float(parts[6]),
-                            "initial_storage": float(parts[7]),
-                            "final_storage": float(parts[8]),
-                            "continuity_error_pct": float(parts[9]),
+                            "total_inflow": _safe_float(parts[2]),
+                            "evap_loss": _safe_float(parts[3]),
+                            "infil_loss": _safe_float(parts[4]),
+                            "surface_outflow": _safe_float(parts[5]),
+                            "drain_outflow": _safe_float(parts[6]),
+                            "initial_storage": _safe_float(parts[7]),
+                            "final_storage": _safe_float(parts[8]),
+                            "continuity_error_pct": _safe_float(parts[9]),
                         }
                     )
                 except (ValueError, IndexError):
@@ -679,7 +743,7 @@ class SwmmReportDecoder:
                 if len(parts) >= 2:
                     key = "_".join(parts[:-2]).lower().replace(".", "")
                     try:
-                        gw_data[key] = float(parts[-2])
+                        gw_data[key] = _safe_float(parts[-2])
                     except ValueError:
                         gw_data[key] = parts[-2]
 
@@ -708,7 +772,7 @@ class SwmmReportDecoder:
                 if len(parts) >= 2:
                     key = "_".join(parts[:-2]).lower().replace(".", "")
                     try:
-                        qr_data[key] = float(parts[-2])
+                        qr_data[key] = _safe_float(parts[-2])
                     except ValueError:
                         qr_data[key] = parts[-2]
 
@@ -804,15 +868,15 @@ class SwmmReportDecoder:
                     classifications.append(
                         {
                             "conduit": parts[0],
-                            "dry": float(parts[1]),
-                            "up_dry": float(parts[2]) if len(parts) > 2 else None,
-                            "down_dry": float(parts[3]) if len(parts) > 3 else None,
-                            "sub_crit": float(parts[4]) if len(parts) > 4 else None,
-                            "sup_crit": float(parts[5]) if len(parts) > 5 else None,
-                            "up_crit": float(parts[6]) if len(parts) > 6 else None,
-                            "down_crit": float(parts[7]) if len(parts) > 7 else None,
-                            "norm_ltd": float(parts[8]) if len(parts) > 8 else None,
-                            "inlet_ctrl": float(parts[9]) if len(parts) > 9 else None,
+                            "dry": _safe_float(parts[1]),
+                            "up_dry": _safe_float(parts[2]) if len(parts) > 2 else None,
+                            "down_dry": _safe_float(parts[3]) if len(parts) > 3 else None,
+                            "sub_crit": _safe_float(parts[4]) if len(parts) > 4 else None,
+                            "sup_crit": _safe_float(parts[5]) if len(parts) > 5 else None,
+                            "up_crit": _safe_float(parts[6]) if len(parts) > 6 else None,
+                            "down_crit": _safe_float(parts[7]) if len(parts) > 7 else None,
+                            "norm_ltd": _safe_float(parts[8]) if len(parts) > 8 else None,
+                            "inlet_ctrl": _safe_float(parts[9]) if len(parts) > 9 else None,
                         }
                     )
                 except (ValueError, IndexError):
