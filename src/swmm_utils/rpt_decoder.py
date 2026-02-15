@@ -379,7 +379,7 @@ class SwmmReportDecoder:
                     continue
 
                 parts = line.split()
-                if len(parts) >= 10:
+                if len(parts) >= 8:
                     try:
                         nodes.append(
                             {
@@ -390,7 +390,9 @@ class SwmmReportDecoder:
                                 "time_of_max_days": _safe_int(parts[4]),
                                 "time_of_max": parts[5],
                                 "lateral_inflow_volume": _safe_float(parts[6]),
-                                "total_inflow_volume": _safe_float(parts[7]),
+                                "total_inflow_volume": (
+                                    _safe_float(parts[7]) if len(parts) > 7 else None
+                                ),
                                 "flow_balance_error": (
                                     _safe_float(parts[8]) if len(parts) > 8 else None
                                 ),
@@ -401,19 +403,63 @@ class SwmmReportDecoder:
 
         return nodes
 
-    def _parse_node_flooding(self, content: str) -> Optional[str]:
-        """Parse node flooding summary."""
+    def _parse_node_flooding(self, content: str):
+        """Parse node flooding summary.
+
+        Returns:
+            - "No nodes were flooded" (str) if no flooding occurred
+            - A list of dicts with flooding data if flooding occurred
+            - None if the section is not found
+        """
         section_match = re.search(
             r"Node Flooding Summary\s*\*+(.+?)(?=\n\s*\n\s*\*+)", content, re.DOTALL
         )
 
-        if section_match:
-            section_text = section_match.group(1).strip()
-            if "No nodes were flooded" in section_text:
-                return "No nodes were flooded"
-            # Could parse flooding data here if needed
+        if not section_match:
+            return None
 
-        return None
+        section_text = section_match.group(1).strip()
+        if "No nodes were flooded" in section_text:
+            return "No nodes were flooded"
+
+        # Parse flooding data table
+        flooded_nodes = []
+        lines = section_text.split("\n")
+        data_started = False
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("-"):
+                continue
+            if "Node" in line and "Flooded" in line:
+                data_started = True
+                continue
+            if "Flooding refers to" in line:
+                continue
+            if not data_started:
+                continue
+
+            parts = line.split()
+            if len(parts) >= 7:
+                try:
+                    flooded_nodes.append(
+                        {
+                            "name": parts[0],
+                            "hours_flooded": _safe_float(parts[1]),
+                            "maximum_rate": _safe_float(parts[2]),
+                            "time_of_max_days": _safe_int(parts[3]),
+                            "time_of_max": parts[4],
+                            "total_flood_volume": (
+                                _safe_float(parts[5]) if len(parts) > 5 else None
+                            ),
+                            "maximum_ponded_depth": (
+                                _safe_float(parts[6]) if len(parts) > 6 else None
+                            ),
+                        }
+                    )
+                except (ValueError, IndexError):
+                    continue
+
+        return flooded_nodes if flooded_nodes else None
 
     def _parse_outfall_loading(self, content: str) -> List[Dict[str, Any]]:
         """Parse outfall loading summary."""
