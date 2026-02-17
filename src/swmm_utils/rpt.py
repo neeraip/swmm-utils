@@ -167,6 +167,16 @@ class SwmmReport:
         """Get analysis time information."""
         return self._data.get("analysis_time", {})
 
+    @property
+    def errors(self) -> List[str]:
+        """Get error messages from the report."""
+        return self._data.get("errors", [])
+
+    @property
+    def warnings(self) -> List[str]:
+        """Get warning messages from the report."""
+        return self._data.get("warnings", [])
+
     def get_node_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
         Get node information by name from depth or inflow summaries.

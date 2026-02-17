@@ -98,6 +98,8 @@ class SwmmReportDecoder:
             "subcatchment_washoff": self._parse_subcatchment_washoff(content),
             "link_pollutant_load": self._parse_link_pollutant_load(content),
             "analysis_time": self._parse_analysis_time(content),
+            "errors": self._parse_errors(content),
+            "warnings": self._parse_warnings(content),
         }
 
         return report_data
@@ -929,3 +931,21 @@ class SwmmReportDecoder:
                     continue
 
         return classifications
+
+    def _parse_errors(self, content: str) -> List[str]:
+        """Parse ERROR lines from the report."""
+        errors = []
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if re.match(r"ERROR\s+\d+", stripped, re.IGNORECASE):
+                errors.append(stripped)
+        return errors
+
+    def _parse_warnings(self, content: str) -> List[str]:
+        """Parse WARNING lines from the report."""
+        warnings = []
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if re.match(r"WARNING\s+\d+", stripped, re.IGNORECASE):
+                warnings.append(stripped)
+        return warnings
