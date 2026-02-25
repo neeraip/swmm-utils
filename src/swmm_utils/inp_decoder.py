@@ -23,8 +23,14 @@ class SwmmInputDecoder:
         Returns:
             Dict containing the parsed SWMM model data
         """
-        with open(filepath, "r", encoding="utf-8") as f:
-            return self.decode(f)
+        # Try UTF-8 first; fall back to Latin-1 (which accepts every byte)
+        # Many SWMM .inp files from older software use Windows-1252/Latin-1
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return self.decode(f)
+        except UnicodeDecodeError:
+            with open(filepath, "r", encoding="latin-1") as f:
+                return self.decode(f)
 
     def decode(self, file: TextIO) -> Dict[str, Any]:
         """Decode SWMM input from a file object.
