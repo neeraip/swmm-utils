@@ -1,4 +1,5 @@
 """Setup configuration for swmm-utils package."""
+
 # pylint: disable=import-error
 from setuptools import setup, find_packages
 

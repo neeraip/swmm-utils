@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src" / "python"))
 
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
-
 # Sample SWMM input for testing
 SAMPLE_INP = """
 [TITLE]

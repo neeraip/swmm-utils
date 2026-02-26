@@ -238,7 +238,9 @@ class SwmmReportDecoder:
                 continue
 
             # Match lines like "Total Precipitation ......         8.176         6.655"
-            match = re.match(r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.><*-]+)\s+([\d.><*-]+)", line)
+            match = re.match(
+                r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.><*-]+)\s+([\d.><*-]+)", line
+            )
             if match:
                 key = (
                     match.group(1)
@@ -494,10 +496,14 @@ class SwmmReportDecoder:
                             "flow_freq": _safe_float(parts[1]),
                             "avg_flow": _safe_float(parts[2]),
                             "max_flow": _safe_float(parts[3]),
-                            "total_volume": _safe_float(parts[4]) if len(parts) > 4 else None,
+                            "total_volume": (
+                                _safe_float(parts[4]) if len(parts) > 4 else None
+                            ),
                         }
                         if len(parts) > 5:
-                            outfall["pollutant_loads"] = [_safe_float(p) for p in parts[5:]]
+                            outfall["pollutant_loads"] = [
+                                _safe_float(p) for p in parts[5:]
+                            ]
                         outfalls.append(outfall)
                     except (ValueError, IndexError):
                         continue
@@ -676,7 +682,9 @@ class SwmmReportDecoder:
                             "max_pct_full": _safe_float(parts[6]),
                             "time_of_max_days": _safe_int(parts[7]),
                             "time_of_max": parts[8],
-                            "max_outflow": _safe_float(parts[9]) if len(parts) > 9 else None,
+                            "max_outflow": (
+                                _safe_float(parts[9]) if len(parts) > 9 else None
+                            ),
                         }
                     )
                 except (ValueError, IndexError):
@@ -918,13 +926,27 @@ class SwmmReportDecoder:
                             "conduit": parts[0],
                             "dry": _safe_float(parts[1]),
                             "up_dry": _safe_float(parts[2]) if len(parts) > 2 else None,
-                            "down_dry": _safe_float(parts[3]) if len(parts) > 3 else None,
-                            "sub_crit": _safe_float(parts[4]) if len(parts) > 4 else None,
-                            "sup_crit": _safe_float(parts[5]) if len(parts) > 5 else None,
-                            "up_crit": _safe_float(parts[6]) if len(parts) > 6 else None,
-                            "down_crit": _safe_float(parts[7]) if len(parts) > 7 else None,
-                            "norm_ltd": _safe_float(parts[8]) if len(parts) > 8 else None,
-                            "inlet_ctrl": _safe_float(parts[9]) if len(parts) > 9 else None,
+                            "down_dry": (
+                                _safe_float(parts[3]) if len(parts) > 3 else None
+                            ),
+                            "sub_crit": (
+                                _safe_float(parts[4]) if len(parts) > 4 else None
+                            ),
+                            "sup_crit": (
+                                _safe_float(parts[5]) if len(parts) > 5 else None
+                            ),
+                            "up_crit": (
+                                _safe_float(parts[6]) if len(parts) > 6 else None
+                            ),
+                            "down_crit": (
+                                _safe_float(parts[7]) if len(parts) > 7 else None
+                            ),
+                            "norm_ltd": (
+                                _safe_float(parts[8]) if len(parts) > 8 else None
+                            ),
+                            "inlet_ctrl": (
+                                _safe_float(parts[9]) if len(parts) > 9 else None
+                            ),
                         }
                     )
                 except (ValueError, IndexError):

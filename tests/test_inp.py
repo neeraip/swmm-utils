@@ -402,6 +402,152 @@ def test_input_setter_rdii():
         assert len(inp.rdii) == 1
 
 
+def test_input_setter_subareas():
+    """Test subareas property setter."""
+    with SwmmInput() as inp:
+        subareas = [
+            {
+                "subcatchment": "S1",
+                "n_imperv": "0.01",
+                "n_perv": "0.1",
+                "s_imperv": "0.05",
+                "s_perv": "0.05",
+                "pct_zero": "25",
+                "route_to": "OUTLET",
+            },
+        ]
+        inp.subareas = subareas
+        assert inp.subareas == subareas
+        assert len(inp.subareas) == 1
+
+
+def test_input_setter_infiltration():
+    """Test infiltration property setter."""
+    with SwmmInput() as inp:
+        infiltration = [
+            {
+                "subcatchment": "S1",
+                "max_rate": "3.0",
+                "min_rate": "0.5",
+                "decay": "4.0",
+                "dry_time": "7",
+                "max_volume": "0",
+            },
+        ]
+        inp.infiltration = infiltration
+        assert inp.infiltration == infiltration
+        assert len(inp.infiltration) == 1
+
+
+def test_input_setter_xsections():
+    """Test xsections property setter."""
+    with SwmmInput() as inp:
+        xsections = [
+            {"link": "C1", "shape": "CIRCULAR", "geom1": "1.0"},
+            {"link": "C2", "shape": "RECT_CLOSED", "geom1": "1.0", "geom2": "0.5"},
+        ]
+        inp.xsections = xsections
+        assert inp.xsections == xsections
+        assert len(inp.xsections) == 2
+
+
+def test_input_setter_losses():
+    """Test losses property setter."""
+    with SwmmInput() as inp:
+        losses = [
+            {"link": "C1", "inlet": "0", "outlet": "0", "average": "0"},
+        ]
+        inp.losses = losses
+        assert inp.losses == losses
+        assert len(inp.losses) == 1
+
+
+def test_input_setter_patterns():
+    """Test patterns property setter."""
+    with SwmmInput() as inp:
+        patterns = {
+            "MONTHLY": [
+                "1.0",
+                "1.0",
+                "1.1",
+                "1.2",
+                "1.3",
+                "1.2",
+                "1.1",
+                "1.0",
+                "0.9",
+                "0.9",
+                "0.9",
+                "1.0",
+            ],
+        }
+        inp.patterns = patterns
+        assert inp.patterns == patterns
+        assert "MONTHLY" in inp.patterns
+
+
+def test_input_setter_outlets():
+    """Test outlets property setter."""
+    with SwmmInput() as inp:
+        outlets = [
+            {
+                "name": "OUT1",
+                "from_node": "S1",
+                "to_node": "J1",
+                "offset": "0",
+                "type": "TABULAR/DEPTH",
+            },
+        ]
+        inp.outlets = outlets
+        assert inp.outlets == outlets
+        assert len(inp.outlets) == 1
+
+
+def test_input_setter_evaporation():
+    """Test evaporation property setter."""
+    with SwmmInput() as inp:
+        evaporation = {"type": "CONSTANT", "values": ["0.1"]}
+        inp.evaporation = evaporation
+        assert inp.evaporation == evaporation
+        assert inp.evaporation["type"] == "CONSTANT"
+
+
+def test_input_setter_inflows():
+    """Test inflows property setter."""
+    with SwmmInput() as inp:
+        inflows = [
+            {
+                "node": "J1",
+                "constituent": "FLOW",
+                "timeseries": "TS1",
+                "type": "FLOW",
+                "mfactor": "1.0",
+            },
+        ]
+        inp.inflows = inflows
+        assert inp.inflows == inflows
+        assert len(inp.inflows) == 1
+
+
+def test_input_setter_dwf():
+    """Test dwf property setter."""
+    with SwmmInput() as inp:
+        dwf = [
+            {"node": "J1", "constituent": "FLOW", "baseline": "0.01"},
+        ]
+        inp.dwf = dwf
+        assert inp.dwf == dwf
+        assert len(inp.dwf) == 1
+
+
+def test_input_setter_transects():
+    """Test transects property setter."""
+    with SwmmInput() as inp:
+        transects = "NC 0.020 0.020 0.020\nX1 TR1 20 0 200 0 0 0 0\n"
+        inp.transects = transects
+        assert inp.transects == transects
+
+
 # ============================================================================
 # DICTIONARY-LIKE INTERFACE TESTS
 # ============================================================================
@@ -660,6 +806,139 @@ def test_input_to_dataframe_complex_data():
 
         df = inp.to_dataframe("conduits")
 
+        assert isinstance(df, pd.DataFrame)
         assert len(df) == 2
         assert df.loc[df["name"] == "C1", "length"].values[0] == 1000
         assert df.loc[df["name"] == "C2", "roughness"].values[0] == 0.012
+
+
+def test_input_to_dataframe_non_list_section_raises():
+    """Test that requesting a non-list section (e.g. options dict) raises ValueError."""
+    with SwmmInput() as inp:
+        inp.options = {"FLOW_UNITS": "CFS"}
+
+        with pytest.raises(ValueError):
+            inp.to_dataframe("options")
+
+
+def test_input_to_dataframe_all_sections_excludes_non_list():
+    """Test that all-sections export excludes dict and string sections."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.title = "Test"
+        inp.options = {"FLOW_UNITS": "CFS"}
+        inp.evaporation = {"type": "CONSTANT", "values": ["0.1"]}
+        inp.transects = "NC 0.020 0.020 0.020\n"
+        inp.junctions = [{"name": "J1", "elevation": 100}]
+
+        dfs = inp.to_dataframe()
+
+        assert "title" not in dfs
+        assert "options" not in dfs
+        assert "evaporation" not in dfs
+        assert "transects" not in dfs
+        assert "junctions" in dfs
+
+
+def test_input_to_dataframe_all_sections_includes_empty_lists():
+    """Test that all-sections export includes sections with empty lists as empty DataFrames."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.junctions = [{"name": "J1"}]
+        inp.outfalls = []  # empty list
+
+        dfs = inp.to_dataframe()
+
+        assert "junctions" in dfs
+        assert "outfalls" in dfs
+        assert isinstance(dfs["outfalls"], pd.DataFrame)
+        assert len(dfs["outfalls"]) == 0
+
+
+def test_input_to_dataframe_only_non_list_sections_returns_empty_dict():
+    """Test that all-sections export returns empty dict when no list sections exist."""
+    with SwmmInput() as inp:
+        inp.title = "No Lists"
+        inp.options = {"FLOW_UNITS": "CFS"}
+
+        dfs = inp.to_dataframe()
+
+        assert isinstance(dfs, dict)
+        assert len(dfs) == 0
+
+
+def test_input_to_dataframe_column_names_match_dict_keys():
+    """Test that DataFrame columns match the keys of the source dicts."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.junctions = [
+            {"name": "J1", "elevation": 100, "max_depth": 5, "init_depth": 0},
+        ]
+
+        df = inp.to_dataframe("junctions")
+
+        assert set(df.columns) == {"name", "elevation", "max_depth", "init_depth"}
+
+
+def test_input_to_dataframe_numeric_dtypes_preserved():
+    """Test that numeric values retain their types in the DataFrame."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.junctions = [
+            {"name": "J1", "elevation": 100, "max_depth": 5.5},
+        ]
+
+        df = inp.to_dataframe("junctions")
+
+        assert df["elevation"].dtype == int or pd.api.types.is_integer_dtype(
+            df["elevation"]
+        )
+        assert df["max_depth"].dtype == float or pd.api.types.is_float_dtype(
+            df["max_depth"]
+        )
+
+
+def test_input_to_dataframe_inconsistent_keys_yields_nan():
+    """Test that rows with missing keys produce NaN for those columns."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.junctions = [
+            {"name": "J1", "elevation": 100, "max_depth": 5},
+            {"name": "J2", "elevation": 90},  # missing max_depth
+        ]
+
+        df = inp.to_dataframe("junctions")
+
+        assert len(df) == 2
+        assert "max_depth" in df.columns
+        assert pd.isna(df.loc[df["name"] == "J2", "max_depth"].values[0])
+
+
+def test_input_to_dataframe_all_sections_subdataframe_accessible():
+    """Test that DataFrames in the all-sections dict are fully functional."""
+    pd = pytest.importorskip("pandas")
+
+    with SwmmInput() as inp:
+        inp.junctions = [
+            {"name": "J1", "elevation": 100},
+            {"name": "J2", "elevation": 95},
+        ]
+        inp.conduits = [
+            {"name": "C1", "from_node": "J1", "to_node": "J2"},
+        ]
+
+        dfs = inp.to_dataframe()
+
+        jdf = dfs["junctions"]
+        assert isinstance(jdf, pd.DataFrame)
+        assert "name" in jdf.columns
+        assert "elevation" in jdf.columns
+        assert jdf["elevation"].max() == 100
+
+        cdf = dfs["conduits"]
+        assert cdf.loc[cdf["name"] == "C1", "from_node"].values[0] == "J1"
