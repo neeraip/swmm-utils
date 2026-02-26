@@ -1,7 +1,12 @@
 """SWMM Input - High-level interface for SWMM input files with typed properties."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, overload
+
+from pandas import DataFrame
+
 from .inp_decoder import SwmmInputDecoder
 from .inp_encoder import SwmmInputEncoder
 
@@ -21,7 +26,7 @@ class SwmmInput:
             # Export all sections as dictionary of dataframes
             all_dfs = inp.to_dataframe()
             junctions_df = all_dfs['junctions']
-            
+
             # Export specific section
             conduits_df = inp.to_dataframe('conduits')
 
@@ -101,7 +106,15 @@ class SwmmInput:
             self._data, str(output_path), single_file=single_file
         )
 
-    def to_dataframe(self, section: Optional[str] = None):
+    @overload
+    def to_dataframe(self, section: str) -> DataFrame: ...
+
+    @overload
+    def to_dataframe(self, section: None = None) -> Dict[str, DataFrame]: ...
+
+    def to_dataframe(
+        self, section: Optional[str] = None
+    ) -> Union[DataFrame, Dict[str, DataFrame]]:
         """Export to Pandas DataFrame(s).
 
         Args:
@@ -300,6 +313,204 @@ class SwmmInput:
     @landuses.setter
     def landuses(self, value: List[Dict[str, Any]]) -> None:
         self._data["landuses"] = value
+
+    @property
+    def coverages(self) -> List[Dict[str, Any]]:
+        """List of land use coverages per subcatchment."""
+        if "coverages" not in self._data:
+            self._data["coverages"] = []
+        return self._data["coverages"]
+
+    @coverages.setter
+    def coverages(self, value: List[Dict[str, Any]]) -> None:
+        self._data["coverages"] = value
+
+    @property
+    def buildup(self) -> List[Dict[str, Any]]:
+        """List of pollutant buildup functions per land use."""
+        if "buildup" not in self._data:
+            self._data["buildup"] = []
+        return self._data["buildup"]
+
+    @buildup.setter
+    def buildup(self, value: List[Dict[str, Any]]) -> None:
+        self._data["buildup"] = value
+
+    @property
+    def washoff(self) -> List[Dict[str, Any]]:
+        """List of pollutant washoff functions per land use."""
+        if "washoff" not in self._data:
+            self._data["washoff"] = []
+        return self._data["washoff"]
+
+    @washoff.setter
+    def washoff(self, value: List[Dict[str, Any]]) -> None:
+        self._data["washoff"] = value
+
+    @property
+    def lid_controls(self) -> List[Dict[str, Any]]:
+        """List of LID (Low Impact Development) control definitions."""
+        if "lid_controls" not in self._data:
+            self._data["lid_controls"] = []
+        return self._data["lid_controls"]
+
+    @lid_controls.setter
+    def lid_controls(self, value: List[Dict[str, Any]]) -> None:
+        self._data["lid_controls"] = value
+
+    @property
+    def lid_usage(self) -> List[Dict[str, Any]]:
+        """List of LID control placements within subcatchments."""
+        if "lid_usage" not in self._data:
+            self._data["lid_usage"] = []
+        return self._data["lid_usage"]
+
+    @lid_usage.setter
+    def lid_usage(self, value: List[Dict[str, Any]]) -> None:
+        self._data["lid_usage"] = value
+
+    @property
+    def files(self) -> List[Dict[str, Any]]:
+        """List of external data files used by the model."""
+        if "files" not in self._data:
+            self._data["files"] = []
+        return self._data["files"]
+
+    @files.setter
+    def files(self, value: List[Dict[str, Any]]) -> None:
+        self._data["files"] = value
+
+    @property
+    def hydrographs(self) -> Any:
+        """Unit hydrograph data (stored as raw text)."""
+        if "hydrographs" not in self._data:
+            self._data["hydrographs"] = ""
+        return self._data["hydrographs"]
+
+    @hydrographs.setter
+    def hydrographs(self, value: Any) -> None:
+        self._data["hydrographs"] = value
+
+    @property
+    def rdii(self) -> List[Dict[str, Any]]:
+        """List of RDII (Rainfall Dependent Inflow/Infiltration) entries."""
+        if "rdii" not in self._data:
+            self._data["rdii"] = []
+        return self._data["rdii"]
+
+    @rdii.setter
+    def rdii(self, value: List[Dict[str, Any]]) -> None:
+        self._data["rdii"] = value
+
+    @property
+    def subareas(self) -> List[Dict[str, Any]]:
+        """List of subcatchment subarea parameters."""
+        if "subareas" not in self._data:
+            self._data["subareas"] = []
+        return self._data["subareas"]
+
+    @subareas.setter
+    def subareas(self, value: List[Dict[str, Any]]) -> None:
+        self._data["subareas"] = value
+
+    @property
+    def infiltration(self) -> List[Dict[str, Any]]:
+        """List of infiltration parameters per subcatchment."""
+        if "infiltration" not in self._data:
+            self._data["infiltration"] = []
+        return self._data["infiltration"]
+
+    @infiltration.setter
+    def infiltration(self, value: List[Dict[str, Any]]) -> None:
+        self._data["infiltration"] = value
+
+    @property
+    def xsections(self) -> List[Dict[str, Any]]:
+        """List of cross-section shapes for conduit links."""
+        if "xsections" not in self._data:
+            self._data["xsections"] = []
+        return self._data["xsections"]
+
+    @xsections.setter
+    def xsections(self, value: List[Dict[str, Any]]) -> None:
+        self._data["xsections"] = value
+
+    @property
+    def losses(self) -> List[Dict[str, Any]]:
+        """List of minor loss parameters for conduit links."""
+        if "losses" not in self._data:
+            self._data["losses"] = []
+        return self._data["losses"]
+
+    @losses.setter
+    def losses(self, value: List[Dict[str, Any]]) -> None:
+        self._data["losses"] = value
+
+    @property
+    def patterns(self) -> Dict[str, Any]:
+        """Dictionary of time patterns (name -> list of multipliers)."""
+        if "patterns" not in self._data:
+            self._data["patterns"] = {}
+        return self._data["patterns"]
+
+    @patterns.setter
+    def patterns(self, value: Dict[str, Any]) -> None:
+        self._data["patterns"] = value
+
+    @property
+    def outlets(self) -> List[Dict[str, Any]]:
+        """List of outlet links."""
+        if "outlets" not in self._data:
+            self._data["outlets"] = []
+        return self._data["outlets"]
+
+    @outlets.setter
+    def outlets(self, value: List[Dict[str, Any]]) -> None:
+        self._data["outlets"] = value
+
+    @property
+    def evaporation(self) -> Dict[str, Any]:
+        """Evaporation parameters."""
+        if "evaporation" not in self._data:
+            self._data["evaporation"] = {}
+        return self._data["evaporation"]
+
+    @evaporation.setter
+    def evaporation(self, value: Dict[str, Any]) -> None:
+        self._data["evaporation"] = value
+
+    @property
+    def inflows(self) -> List[Dict[str, Any]]:
+        """List of external inflow entries."""
+        if "inflows" not in self._data:
+            self._data["inflows"] = []
+        return self._data["inflows"]
+
+    @inflows.setter
+    def inflows(self, value: List[Dict[str, Any]]) -> None:
+        self._data["inflows"] = value
+
+    @property
+    def dwf(self) -> List[Dict[str, Any]]:
+        """List of dry weather flow entries."""
+        if "dwf" not in self._data:
+            self._data["dwf"] = []
+        return self._data["dwf"]
+
+    @dwf.setter
+    def dwf(self, value: List[Dict[str, Any]]) -> None:
+        self._data["dwf"] = value
+
+    @property
+    def transects(self) -> str:
+        """Transect geometry data (stored as raw text)."""
+        if "transects" not in self._data:
+            self._data["transects"] = ""
+        return self._data["transects"]
+
+    @transects.setter
+    def transects(self, value: str) -> None:
+        self._data["transects"] = value
 
     # Generic access for all sections
     def __getitem__(self, key: str) -> Any:

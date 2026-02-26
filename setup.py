@@ -1,4 +1,5 @@
 """Setup configuration for swmm-utils package."""
+
 # pylint: disable=import-error
 from setuptools import setup, find_packages
 
@@ -15,7 +16,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="swmm-utils",
-    version="0.5.0",
+    version="1.0.0",
     author="NEER",
     author_email="support@neer.ai",
     description=description,

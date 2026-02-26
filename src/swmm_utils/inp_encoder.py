@@ -4,11 +4,16 @@ This module contains all input encoding functionality. While it exceeds the stan
 line limit, it remains a cohesive, single-purpose module focused entirely on encoding
 SWMM input models to various formats.
 """
+
 # pylint: disable=too-many-lines
 
+from __future__ import annotations
+
 import json
-from typing import Any, Dict, Optional, TextIO, Union
 from pathlib import Path
+from typing import Any, Dict, Optional, TextIO, Union, overload
+
+from pandas import DataFrame
 
 
 class SwmmInputEncoder:
@@ -124,7 +129,17 @@ class SwmmInputEncoder:
         # Return the JSON string for backwards compatibility
         return json.dumps(model, indent=2 if pretty else None)
 
-    def encode_to_dataframe(self, model: Dict[str, Any], section: Optional[str] = None):
+    @overload
+    def encode_to_dataframe(self, model: Dict[str, Any], section: str) -> DataFrame: ...
+
+    @overload
+    def encode_to_dataframe(
+        self, model: Dict[str, Any], section: None = None
+    ) -> Dict[str, DataFrame]: ...
+
+    def encode_to_dataframe(
+        self, model: Dict[str, Any], section: Optional[str] = None
+    ) -> Union[DataFrame, Dict[str, DataFrame]]:
         """Encode SWMM model section(s) to Pandas DataFrame(s).
 
         Args:

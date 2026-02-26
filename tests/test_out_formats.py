@@ -6,7 +6,6 @@ from pathlib import Path
 
 from swmm_utils import SwmmOutput
 
-
 # Get the examples directory
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 EXAMPLE1_OUT = EXAMPLES_DIR / "example1" / "example1.out"
@@ -161,6 +160,7 @@ class TestSwmmOutputFormats:
 
         assert parquet_file.exists()
         assert parquet_file.parent.exists()
+
     @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
     def test_to_dataframe_full_export(self, tmp_path):
         """Test full DataFrame export with metadata and all sections."""
@@ -226,7 +226,9 @@ class TestSwmmOutputFormats:
                 assert link_df.index.name == "timestamp"
 
                 # Should have value columns
-                value_cols = [col for col in link_df.columns if col.startswith("value_")]
+                value_cols = [
+                    col for col in link_df.columns if col.startswith("value_")
+                ]
                 assert len(value_cols) > 0
 
                 # Should have n_periods rows

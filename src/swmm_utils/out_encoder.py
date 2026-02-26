@@ -321,7 +321,11 @@ class SwmmOutputEncoder:
         )
 
     def _build_section_dataframe(
-        self, time_series: Dict[str, Any], element_type: str, labels: list, time_index: list
+        self,
+        time_series: Dict[str, Any],
+        element_type: str,
+        labels: list,
+        time_index: list,
     ):
         """Build MultiIndex DataFrame for a section (nodes, links, subcatchments).
 
@@ -382,7 +386,11 @@ class SwmmOutputEncoder:
         return df
 
     def _build_element_dataframe(
-        self, time_series: Dict[str, Any], element_type: str, element_name: str, time_index: list
+        self,
+        time_series: Dict[str, Any],
+        element_type: str,
+        element_name: str,
+        time_index: list,
     ):
         """Build DataFrame for a single element's full time series.
 

@@ -9,7 +9,6 @@ from datetime import datetime
 
 from swmm_utils import SwmmOutputDecoder
 
-
 # Get the examples directory
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 EXAMPLE1_OUT = EXAMPLES_DIR / "example1" / "example1.out"

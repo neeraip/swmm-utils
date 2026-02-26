@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 from swmm_utils import SwmmOutput
 
-
 # Get the examples directory
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 EXAMPLE1_OUT = EXAMPLES_DIR / "example1" / "example1.out"
@@ -203,6 +202,7 @@ class TestSwmmOutput:
 
         for pollutant_name, unit in units.items():
             assert unit in ["MG", "UG", "COUNTS", "UNKNOWN"]
+
     @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
     def test_to_dataframe_no_timeseries(self):
         """Test to_dataframe() without time series loaded."""
@@ -255,18 +255,18 @@ class TestSwmmOutput:
     @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
     def test_to_dataframe_section_export(self):
         """Test to_dataframe() section-level export."""
+        import pandas as pd
+
         output = SwmmOutput(EXAMPLE1_OUT, load_time_series=True)
 
-        # Section export
+        # Section export returns a MultiIndex DataFrame (timestamp, element_name)
         nodes_df = output.to_dataframe("nodes")
         links_df = output.to_dataframe("links")
         subcatchments_df = output.to_dataframe("subcatchments")
 
-        # All should be DataFrames
         for section_df in [nodes_df, links_df, subcatchments_df]:
-            assert hasattr(section_df, "shape")  # Is a DataFrame
+            assert isinstance(section_df, pd.DataFrame)
             if len(section_df) > 0:
-                # Should have MultiIndex if not empty
                 assert section_df.index.names == ["timestamp", "element_name"]
 
     @pytest.mark.skipif(not EXAMPLE1_OUT.exists(), reason="example1.out not found")
@@ -277,8 +277,15 @@ class TestSwmmOutput:
         # Get first link if available
         if output.n_links > 0:
             first_link = output.link_labels[0]
-            link_df = output.to_dataframe("links", first_link)
+            result = output.to_dataframe("links", first_link)
 
+            # Extract DataFrame from result (may be dict or DataFrame)
+            if isinstance(result, dict):
+                link_df = result.get(first_link)
+            else:
+                link_df = result
+
+            assert link_df is not None
             assert hasattr(link_df, "shape")  # Is a DataFrame
             if len(link_df) > 0:
                 # Should have simple timestamp index

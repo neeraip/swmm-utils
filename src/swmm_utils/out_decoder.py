@@ -138,12 +138,16 @@ class SwmmOutputDecoder:
 
         # Calculate total record size in bytes
         # Each record starts with 8-byte timestamp (double) followed by data
-        record_size = 8 + (  # 8 bytes for timestamp
-            n_subcatch * n_subcatch_vars
-            + n_nodes * n_node_vars
-            + n_links * n_link_vars
-            + n_system_vars
-        ) * 4
+        record_size = (
+            8
+            + (  # 8 bytes for timestamp
+                n_subcatch * n_subcatch_vars
+                + n_nodes * n_node_vars
+                + n_links * n_link_vars
+                + n_system_vars
+            )
+            * 4
+        )
 
         # Find the start of time series data from the footer
         f.seek(-6 * self._RECORD_SIZE, 2)
@@ -252,23 +256,23 @@ class SwmmOutputDecoder:
         # Each type has: count (int) followed by count variable codes (ints)
         num_subcatch_vars = self._read_int(f)
         subcatch_var_codes = self._read_n_ints(f, num_subcatch_vars)
-        
+
         num_node_vars = self._read_int(f)
         node_var_codes = self._read_n_ints(f, num_node_vars)
-        
+
         num_link_vars = self._read_int(f)
         link_var_codes = self._read_n_ints(f, num_link_vars)
-        
+
         num_system_vars = self._read_int(f)
         system_var_codes = self._read_n_ints(f, num_system_vars)
-        
+
         variables = {
             "subcatchment": num_subcatch_vars,
             "node": num_node_vars,
             "link": num_link_vars,
             "system": num_system_vars,
         }
-        
+
         variable_codes = {
             "subcatchment": subcatch_var_codes,
             "node": node_var_codes,
@@ -358,7 +362,7 @@ class SwmmOutputDecoder:
 
     def _excel_date_to_datetime(self, excel_date: float) -> datetime:
         """Convert Excel serial date to Python datetime.
-        
+
         Excel serial dates are days since 1899-12-30.
         """
         try:

@@ -304,9 +304,7 @@ def main():
                         f"      ✓ Links section: {links_section_df.shape[0]} row(s), {links_section_df.shape[1]} column(s)"
                     )
                     if len(links_section_df) > 0:
-                        print(
-                            f"      ✓ Index levels: {links_section_df.index.names}"
-                        )
+                        print(f"      ✓ Index levels: {links_section_df.index.names}")
                         print("      Sample data (first 3 rows):")
                         print(links_section_df.head(3).to_string())
 
@@ -320,7 +318,9 @@ def main():
                         print(
                             f"      ✓ Single link time series: {link_ts_df.shape[0]} row(s), {link_ts_df.shape[1]} column(s)"
                         )
-                        print(f"      ✓ Time period: {link_ts_df.index.min()} to {link_ts_df.index.max()}")
+                        print(
+                            f"      ✓ Time period: {link_ts_df.index.min()} to {link_ts_df.index.max()}"
+                        )
                         print("      Sample data (first 3 timesteps):")
                         print(link_ts_df.head(3).to_string())
 
