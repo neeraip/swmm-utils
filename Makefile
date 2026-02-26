@@ -45,17 +45,17 @@ clean:
 
 bump-patch:
 	bump2version patch
-	git push origin main
+	git push origin HEAD
 	git push origin --tags
 
 bump-minor:
 	bump2version minor
-	git push origin main
+	git push origin HEAD
 	git push origin --tags
 
 bump-major:
 	bump2version major
-	git push origin main
+	git push origin HEAD
 	git push origin --tags
 
 example1:
