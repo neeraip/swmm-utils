@@ -16,7 +16,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="swmm-utils",
-    version="1.0.1",
+    version="1.0.2",
     author="NEER",
     author_email="support@neer.ai",
     description=description,
@@ -39,7 +39,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "pandas>=1.0.1",
+        "pandas>=1.0.2",
         "pyarrow>=10.0.0",
     ],
     extras_require={
