@@ -10,11 +10,9 @@ SWMM input models to various formats.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, Optional, TextIO, Union, overload
+from pandas import DataFrame
 from pathlib import Path
-
-if TYPE_CHECKING:
-    from pandas import DataFrame
+from typing import Any, Dict, Optional, TextIO, Union, overload
 
 
 class SwmmInputEncoder:
