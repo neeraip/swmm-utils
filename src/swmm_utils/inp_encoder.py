@@ -10,9 +10,10 @@ SWMM input models to various formats.
 from __future__ import annotations
 
 import json
-from pandas import DataFrame
 from pathlib import Path
 from typing import Any, Dict, Optional, TextIO, Union, overload
+
+from pandas import DataFrame
 
 
 class SwmmInputEncoder:

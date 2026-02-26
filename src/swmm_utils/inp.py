@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pandas import DataFrame
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, overload
+
+from pandas import DataFrame
 
 from .inp_decoder import SwmmInputDecoder
 from .inp_encoder import SwmmInputEncoder
