@@ -7,11 +7,14 @@ SWMM input models to various formats.
 
 # pylint: disable=too-many-lines
 
+from __future__ import annotations
+
 import json
-from typing import Any, Dict, Optional, TextIO, Union, overload
+from typing import TYPE_CHECKING, Any, Dict, Optional, TextIO, Union, overload
 from pathlib import Path
 
-from pandas import DataFrame
+if TYPE_CHECKING:
+    from pandas import DataFrame
 
 
 class SwmmInputEncoder:

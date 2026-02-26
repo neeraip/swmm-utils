@@ -1,9 +1,13 @@
 """SWMM Input - High-level interface for SWMM input files with typed properties."""
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, overload
+from __future__ import annotations
 
-from pandas import DataFrame
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, overload
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
+
 from .inp_decoder import SwmmInputDecoder
 from .inp_encoder import SwmmInputEncoder
 
