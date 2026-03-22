@@ -732,29 +732,40 @@ class SwmmInputEncoder:
                             file.write(f"{name:<16} {value}\n")
 
     def _write_patterns(self, model: Dict[str, Any], file: TextIO):
-        """Write [PATTERNS] section."""
+        """Write [PATTERNS] section.
+
+        Supports three formats:
+        - Dict: {name: [multiplier_values]} — writes as HOURLY type
+        - List of dicts: [{name, type, multipliers}] — writes with explicit type
+        - List of strings: pre-formatted lines
+        """
         if "patterns" in model and model["patterns"]:
             self._write_section_header(file, "PATTERNS")
             file.write(";;Name           Type       Multipliers\n")
 
-            # Handle both dict format (name -> values) and array format ([{name, values}])
             patterns_data = model["patterns"]
             if isinstance(patterns_data, dict):
-                # Dict format: iterate over items
+                # Dict format: {name: [values]} — default to HOURLY type
                 for name, values in patterns_data.items():
-                    # Write 6 values per line
-                    for i in range(0, len(values), 6):
-                        chunk = values[i : i + 6]
-                        file.write(f"{name:<16} {' '.join(chunk)}\n")
+                    str_values = [str(v) for v in values]
+                    for i in range(0, len(str_values), 6):
+                        chunk = str_values[i : i + 6]
+                        pat_type = "HOURLY" if i == 0 else ""
+                        file.write(f"{name:<16} {pat_type:<10} {' '.join(chunk)}\n")
             elif isinstance(patterns_data, list):
-                # Array format: iterate over list
                 for pattern in patterns_data:
-                    name = self._get_field(pattern, "name")
-                    values = pattern.get("values", [])
-                    # Write 6 values per line
-                    for i in range(0, len(values), 6):
-                        chunk = values[i : i + 6]
-                        file.write(f"{name:<16} {' '.join(chunk)}\n")
+                    if isinstance(pattern, str):
+                        # Pre-formatted string
+                        file.write(f"{pattern}\n")
+                    elif isinstance(pattern, dict):
+                        name = self._get_field(pattern, "name", "id")
+                        pat_type = self._get_field(pattern, "type", default="HOURLY")
+                        multipliers = pattern.get("multipliers", pattern.get("values", []))
+                        str_vals = [str(v) for v in multipliers]
+                        for i in range(0, len(str_vals), 6):
+                            chunk = str_vals[i : i + 6]
+                            t = pat_type if i == 0 else ""
+                            file.write(f"{name:<16} {t:<10} {' '.join(chunk)}\n")
 
     def _write_curves(self, model: Dict[str, Any], file: TextIO):
         """Write [CURVES] section."""
@@ -957,7 +968,14 @@ class SwmmInputEncoder:
                 node = self._get_field(entry, "node")
                 constituent = self._get_field(entry, "constituent", default="")
                 baseline = self._get_field(entry, "baseline", default="0")
-                patterns = " ".join(entry.get("patterns", []))
+                patterns_val = entry.get("patterns", [])
+                # Handle both list and string formats
+                if isinstance(patterns_val, str):
+                    patterns = patterns_val
+                elif isinstance(patterns_val, list):
+                    patterns = " ".join(str(p) for p in patterns_val)
+                else:
+                    patterns = ""
 
                 file.write(f"{node:<16} {constituent:<16} {baseline:<10} {patterns}\n")
 
@@ -1097,15 +1115,42 @@ class SwmmInputEncoder:
                 file.write(f"{key:<20} {value}\n")
 
     def _write_hydrographs(self, model: Dict[str, Any], file: TextIO):
-        """Write [HYDROGRAPHS] section."""
+        """Write [HYDROGRAPHS] section.
+
+        Supports:
+        - List of strings: pre-formatted lines
+        - List of dicts: {name, raingage, month, response, R, T, K, ...}
+        """
         if "hydrographs" in model and model["hydrographs"]:
             self._write_section_header(file, "HYDROGRAPHS")
+            file.write(";;Hydrograph     Rain Gage/Month  Response R        T        K       \n")
             hydrographs_data = model["hydrographs"]
             if isinstance(hydrographs_data, str):
                 file.write(hydrographs_data)
             else:
                 for entry in hydrographs_data:
-                    file.write(f"{entry}\n")
+                    if isinstance(entry, str):
+                        file.write(f"{entry}\n")
+                    elif isinstance(entry, dict):
+                        name = self._get_field(entry, "name")
+                        month = self._get_field(entry, "month", default="")
+                        response = self._get_field(entry, "response", default="")
+                        if response:
+                            # RTK data line: Name Month Response R T K [Dmax Drec D0]
+                            R = self._get_field(entry, "R", default="")
+                            T = self._get_field(entry, "T", default="")
+                            K = self._get_field(entry, "K", default="")
+                            Dmax = self._get_field(entry, "Dmax", default="")
+                            Drec = self._get_field(entry, "Drec", default="")
+                            D0 = self._get_field(entry, "D0", default="")
+                            file.write(
+                                f"{name:<16} {month:<16} {response:<8} "
+                                f"{R:<8} {T:<8} {K:<8} {Dmax} {Drec} {D0}\n"
+                            )
+                        else:
+                            # Rain gage assignment: Name RainGage
+                            raingage = self._get_field(entry, "raingage", default="")
+                            file.write(f"{name:<16} {raingage}\n")
 
     def _write_rdii(self, model: Dict[str, Any], file: TextIO):
         """Write [RDII] section."""

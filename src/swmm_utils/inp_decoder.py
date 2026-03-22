@@ -361,18 +361,22 @@ class SwmmInputDecoder:
         model["outfalls"] = outfalls
 
     def _parse_storage(self, model: dict, data: List[str]):
-        """Parse [STORAGE] section."""
+        """Parse [STORAGE] section.
+
+        Format: Name Elev MaxDepth InitDepth CurveType Params...
+        Minimum 4 fields (name, elev, depth, init_depth); curve type and params optional.
+        """
         storage_nodes = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 6:
+            if len(parts) >= 4:
                 storage = {
                     "name": parts[0],
                     "elevation": parts[1],
                     "max_depth": parts[2],
                     "init_depth": parts[3],
-                    "curve_type": parts[4],
-                    "curve_params": parts[5:],
+                    "curve_type": parts[4] if len(parts) > 4 else "FUNCTIONAL",
+                    "curve_params": parts[5:] if len(parts) > 5 else ["1000", "0", "0"],
                 }
                 storage_nodes.append(storage)
         model["storage"] = storage_nodes
