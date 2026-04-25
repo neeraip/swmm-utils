@@ -18,6 +18,14 @@ from .rpt import SwmmReport
 from .out_decoder import SwmmOutputDecoder
 from .out_encoder import SwmmOutputEncoder
 from .out import SwmmOutput
+from .exports import (
+    decode_to_data_json,
+    encode_with_overlay,
+    emit_report_json,
+    emit_results_zarr,
+    SPATIAL_SECTIONS,
+    NON_SPATIAL_SECTIONS,
+)
 
 __all__ = [
     "SwmmInput",  # Primary input file interface
@@ -28,4 +36,11 @@ __all__ = [
     "SwmmOutput",  # Primary output file interface
     "SwmmOutputDecoder",
     "SwmmOutputEncoder",
+    # Producer-side exports (Console / WRM API)
+    "decode_to_data_json",
+    "encode_with_overlay",
+    "emit_report_json",
+    "emit_results_zarr",
+    "SPATIAL_SECTIONS",
+    "NON_SPATIAL_SECTIONS",
 ]
