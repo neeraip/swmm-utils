@@ -15,6 +15,7 @@ from swmm_utils.exports import (
     SPATIAL_SECTIONS,
     decode_to_data_json,
     emit_report_json,
+    emit_results_parquet,
     encode_with_overlay,
 )
 
@@ -146,3 +147,79 @@ def test_emit_results_zarr_writes_and_reopens(tmp_path):
     ds = xr.open_zarr(str(store), consolidated=True)
     # At least one of the three roles must be present.
     assert any(name in ds.data_vars for name in ("nodes", "links", "subcatchments"))
+
+
+# ---------------------------------------------------------------------------
+# emit_results_parquet
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not OUT_EXAMPLE1.exists(), reason="example1.out not found")
+def test_emit_results_parquet_shape_and_types(tmp_path):
+    import pyarrow.parquet as pq
+
+    pq_path = tmp_path / "results.parquet"
+    desc = emit_results_parquet(OUT_EXAMPLE1, INP_EXAMPLE1, str(pq_path))
+
+    expected_head = ["fid", "role", "element_type", "period_idx", "period_ts", "period_seconds"]
+    assert desc["columns"][:6] == expected_head
+
+    table = pq.read_table(str(pq_path))
+    assert table.num_rows > 0
+
+    t_schema = {f.name: str(f.type) for f in table.schema}
+    assert t_schema["fid"] == "string"
+    assert t_schema["role"] == "string"
+    assert t_schema["element_type"] == "string"
+    assert t_schema["period_idx"] == "int32"
+    assert t_schema["period_seconds"] == "int32"
+    assert t_schema["period_ts"].startswith("timestamp")
+    # All SWMM metric columns must be float32.
+    for m in (
+        "depth", "head", "flow_rate", "flow_velocity", "rainfall", "runoff",
+    ):
+        assert t_schema[m] == "float"
+
+
+@pytest.mark.skipif(not OUT_EXAMPLE1.exists(), reason="example1.out not found")
+def test_emit_results_parquet_null_across_roles(tmp_path):
+    import pyarrow.parquet as pq
+
+    pq_path = tmp_path / "results.parquet"
+    emit_results_parquet(OUT_EXAMPLE1, INP_EXAMPLE1, str(pq_path))
+
+    df = pq.read_table(str(pq_path)).to_pandas()
+
+    # Node rows: link & subcatchment metrics must be NaN.
+    node_rows = df[df["role"] == "node"]
+    if len(node_rows) > 0:
+        row = node_rows.iloc[0]
+        assert all(str(row[c]) == "nan" for c in ("flow_rate", "flow_velocity"))
+        assert all(str(row[c]) == "nan" for c in ("rainfall", "runoff"))
+
+    # Link rows: node & subcatchment metrics must be NaN.
+    link_rows = df[df["role"] == "link"]
+    if len(link_rows) > 0:
+        row = link_rows.iloc[0]
+        assert all(str(row[c]) == "nan" for c in ("depth", "head", "volume"))
+        assert all(str(row[c]) == "nan" for c in ("rainfall", "runoff"))
+
+    # Subcatchment rows: node & link metrics must be NaN.
+    sub_rows = df[df["role"] == "subcatchment"]
+    if len(sub_rows) > 0:
+        row = sub_rows.iloc[0]
+        assert all(str(row[c]) == "nan" for c in ("depth", "head", "volume"))
+        assert all(str(row[c]) == "nan" for c in ("flow_rate", "flow_velocity"))
+
+
+@pytest.mark.skipif(not OUT_EXAMPLE1.exists(), reason="example1.out not found")
+def test_emit_results_parquet_compression(tmp_path):
+    """Writer settings must match file-ingestion-engine (zstd, row groups)."""
+    import pyarrow.parquet as pq
+
+    pq_path = tmp_path / "results.parquet"
+    emit_results_parquet(OUT_EXAMPLE1, INP_EXAMPLE1, str(pq_path))
+
+    md = pq.read_metadata(str(pq_path))
+    rg = md.row_group(0)
+    for i in range(rg.num_columns):
+        assert rg.column(i).compression == "ZSTD"

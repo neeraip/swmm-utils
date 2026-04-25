@@ -302,6 +302,250 @@ def _summarize_per_feature(df) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# .out → results.parquet   (sidecar for file-ingestion-engine query service)
+# ---------------------------------------------------------------------------
+
+# Compression/writer settings mirrored from
+# `neeraip/file-ingestion-engine/ingest/csv_ingest.py`.
+_PARQUET_WRITER_KWARGS: Dict[str, Any] = {
+    "compression": "zstd",
+    "compression_level": 3,
+    "use_dictionary": True,
+    "write_statistics": True,
+    "data_page_size": 1 << 20,     # 1 MB
+    "row_group_size": 1_000_000,
+    "flavor": "spark",
+}
+
+# Synthetic timestamp base so the query service's datetime parsing works
+# without configuration. SWMM .out timestamps CAN be real wall-clock if the
+# model's START_DATE is set, but we use a synthetic anchor for consistency
+# with the EPANET emitter. Add period_seconds to this to derive period_ts.
+_PERIOD_TS_BASE = "2000-01-01"
+
+
+def emit_results_parquet(
+    out_path: PathLike,
+    inp_path: PathLike,
+    parquet_path: PathLike,
+) -> Dict[str, Any]:
+    """
+    Write simulation time-series to a single Parquet file as a sidecar for
+    the file-ingestion-engine query service. Long-by-period wide-by-metric
+    format: one row per (feature, period). Per-role metric columns are
+    nulled across the other role(s).
+
+    Schema:
+        fid             string (dict)   — SWMM element id ("J-101","C-12")
+        role            string (dict)   — "node" | "link" | "subcatchment"
+        element_type    string (dict)   — junction|outfall|storage|divider|
+                                          conduit|pump|orifice|weir|outlet|
+                                          subcatchment
+        period_idx      int32
+        period_ts       timestamp[us]   — synthetic, base 2000-01-01
+        period_seconds  int32
+        depth / head / volume / lateral_inflow / total_inflow / flooding   (nodes)
+        flow_rate / flow_depth / flow_velocity / flow_volume / capacity   (links)
+        rainfall / snow_depth / evaporation / infiltration / runoff       (subcatchments)
+
+    All metric columns are float32. Rows from other roles have NULL in the
+    metric columns not applicable to that role.
+
+    Writer settings match file-ingestion-engine/ingest/csv_ingest.py so the
+    query service reads it indistinguishably from CSV-origin Parquet.
+
+    Args:
+        out_path:     Path to SWMM binary .out.
+        inp_path:     Path to source .inp (for element_type classification).
+        parquet_path: Destination path for the `.parquet` file.
+
+    Returns:
+        Small descriptor dict: row count, column list, n_periods.
+    """
+    try:
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as e:
+        raise ImportError(
+            "emit_results_parquet requires `pandas` and `pyarrow` (already "
+            "in install_requires — reinstall the package)."
+        ) from e
+
+    element_type_by_id = _classify_element_types(inp_path)
+
+    with SwmmOutput(Path(out_path), load_time_series=True) as ep:
+        n_periods = ep.n_periods
+        step_seconds = int(ep.report_interval.total_seconds()) if ep.report_interval else 1
+        node_df = _safe_to_dataframe(ep, "nodes")
+        link_df = _safe_to_dataframe(ep, "links")
+        sub_df = _safe_to_dataframe(ep, "subcatchments")
+
+    frames = []
+    if node_df is not None:
+        frames.append(_prepare_role_frame(
+            node_df, role="node", metrics=_NODE_METRICS,
+            element_type_by_id=element_type_by_id,
+            step_seconds=step_seconds,
+        ))
+    if link_df is not None:
+        frames.append(_prepare_role_frame(
+            link_df, role="link", metrics=_LINK_METRICS,
+            element_type_by_id=element_type_by_id,
+            step_seconds=step_seconds,
+        ))
+    if sub_df is not None:
+        frames.append(_prepare_role_frame(
+            sub_df, role="subcatchment", metrics=_SUB_METRICS,
+            element_type_by_id=element_type_by_id,
+            step_seconds=step_seconds,
+        ))
+
+    if not frames:
+        df = pd.DataFrame(columns=_parquet_schema_columns())
+    else:
+        df = pd.concat(frames, ignore_index=True, sort=False)
+
+    # Materialize timestamps from period_seconds.
+    base = pd.Timestamp(_PERIOD_TS_BASE)
+    df["period_ts"] = base + pd.to_timedelta(df["period_seconds"].astype("int64"), unit="s")
+
+    df = _coerce_parquet_types(df)
+    table = pa.Table.from_pandas(df, preserve_index=False)
+
+    out_path_local = Path(parquet_path)
+    out_path_local.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, str(out_path_local), **_PARQUET_WRITER_KWARGS)
+
+    return {
+        "rows": int(len(df)),
+        "columns": list(df.columns),
+        "n_periods": int(n_periods),
+        "report_time_step_seconds": step_seconds,
+        "node_metrics": list(_NODE_METRICS),
+        "link_metrics": list(_LINK_METRICS),
+        "sub_metrics": list(_SUB_METRICS),
+    }
+
+
+def _classify_element_types(inp_path: PathLike) -> Dict[str, str]:
+    """Map every node/link/subcatchment id → canonical element_type."""
+    with SwmmInput(Path(inp_path)) as inp:
+        full = inp.to_dict()
+
+    out: Dict[str, str] = {}
+    mapping = (
+        ("junctions", "junction"),
+        ("outfalls", "outfall"),
+        ("storage", "storage"),
+        ("dividers", "divider"),
+        ("conduits", "conduit"),
+        ("pumps", "pump"),
+        ("orifices", "orifice"),
+        ("weirs", "weir"),
+        ("outlets", "outlet"),
+        ("subcatchments", "subcatchment"),
+    )
+    for section, element_type in mapping:
+        for row in full.get(section, []) or []:
+            fid = row.get("id") or row.get("name") or row.get("node")
+            if fid:
+                out[fid] = element_type
+    return out
+
+
+def _parquet_schema_columns() -> list:
+    return [
+        "fid", "role", "element_type",
+        "period_idx", "period_ts", "period_seconds",
+        *_NODE_METRICS,
+        *_LINK_METRICS,
+        *_SUB_METRICS,
+    ]
+
+
+def _prepare_role_frame(
+    df,
+    *,
+    role: str,
+    metrics: Iterable[str],
+    element_type_by_id: Dict[str, str],
+    step_seconds: int,
+):
+    """
+    Reshape a SwmmOutput MultiIndex DataFrame to the common Parquet schema.
+
+    SwmmOutput.to_dataframe(element_type=<role>) returns a MultiIndex
+    DataFrame where the index levels are (timestamp, element_name) and the
+    columns are the metric names. We flatten into long rows with added
+    fid / role / element_type / period_idx / period_seconds columns.
+    """
+    import pandas as pd
+
+    metrics = tuple(metrics)
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame(columns=_parquet_schema_columns())
+
+    # Flatten index into columns.
+    flat = df.reset_index()
+
+    idx_names = list(df.index.names)
+    # Normalize the two level names to canonical "timestamp" + "fid".
+    if "element_name" in idx_names:
+        flat = flat.rename(columns={"element_name": "fid"})
+    elif "name" in idx_names:
+        flat = flat.rename(columns={"name": "fid"})
+    else:
+        # Fall back to positional — assume level 1 is the element name.
+        non_time = [c for c in idx_names if c != "timestamp"]
+        if non_time:
+            flat = flat.rename(columns={non_time[0]: "fid"})
+
+    if "timestamp" in flat.columns:
+        ts_col = "timestamp"
+    else:
+        # Some SwmmOutput versions may name the time level differently.
+        time_candidates = [c for c in idx_names if c not in ("element_name", "name", "fid")]
+        ts_col = time_candidates[0] if time_candidates else None
+
+    # period_idx: 0-based sequential per distinct timestamp, in order.
+    if ts_col is not None:
+        # Unique timestamps in first-appearance order.
+        unique_ts = pd.Series(flat[ts_col].unique()).reset_index(drop=True)
+        ts_to_idx = {t: i for i, t in enumerate(unique_ts)}
+        flat["period_idx"] = flat[ts_col].map(ts_to_idx).astype("int32")
+    else:
+        flat["period_idx"] = 0
+
+    flat["role"] = role
+    flat["element_type"] = flat["fid"].map(element_type_by_id).fillna(role)
+    flat["period_seconds"] = (flat["period_idx"].astype("int64") * int(step_seconds)).astype("int32")
+
+    # Ensure every expected metric column exists across all roles.
+    for m in (*_NODE_METRICS, *_LINK_METRICS, *_SUB_METRICS):
+        if m not in flat.columns:
+            flat[m] = pd.NA
+
+    return flat
+
+
+def _coerce_parquet_types(df):
+    """Cast columns to the types expected by the file-ingestion-engine."""
+    import pandas as pd
+
+    df["fid"] = df["fid"].astype("string")
+    df["role"] = df["role"].astype("string")
+    df["element_type"] = df["element_type"].astype("string")
+    df["period_idx"] = df["period_idx"].astype("int32")
+    df["period_seconds"] = df["period_seconds"].astype("int32")
+    for col in (*_NODE_METRICS, *_LINK_METRICS, *_SUB_METRICS):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float32")
+    cols = _parquet_schema_columns()
+    return df.reindex(columns=cols)
+
+
+# ---------------------------------------------------------------------------
 # .out → results.zarr
 # ---------------------------------------------------------------------------
 
