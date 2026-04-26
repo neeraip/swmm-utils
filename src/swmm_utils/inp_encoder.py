@@ -65,10 +65,14 @@ class SwmmInputEncoder:
         self._write_title(model, file)
         self._write_options(model, file)
         self._write_evaporation(model, file)
+        self._write_temperature(model, file)
+        self._write_adjustments(model, file)
         self._write_raingages(model, file)
         self._write_subcatchments(model, file)
         self._write_subareas(model, file)
         self._write_infiltration(model, file)
+        self._write_aquifers(model, file)
+        self._write_snowpacks(model, file)
         self._write_junctions(model, file)
         self._write_outfalls(model, file)
         self._write_storage(model, file)
@@ -335,14 +339,127 @@ class SwmmInputEncoder:
                 file.write(f"{key:<20} {value}\n")
 
     def _write_evaporation(self, model: Dict[str, Any], file: TextIO):
-        """Write [EVAPORATION] section."""
+        """Write [EVAPORATION] section.
+
+        Two on-disk shapes are supported:
+          1. Modern keyed dict (decoder output) — ``{constant: "0.0",
+             dry_only: "NO", recovery: "pat1"}``. Each entry becomes
+             one line with the key uppercased back to the SWMM token.
+          2. Legacy ``{type, values}`` from older saves — emitted as a
+             single line. Kept so existing data.json files in S3 still
+             round-trip.
+        """
         if "evaporation" in model and model["evaporation"]:
-            self._write_section_header(file, "EVAPORATION")
             evap = model["evaporation"]
+            self._write_section_header(file, "EVAPORATION")
             file.write(";;Type       Parameters\n")
 
-            values = " ".join(evap.get("values", []))
-            file.write(f"{evap.get('type', 'CONSTANT'):<12} {values}\n")
+            if isinstance(evap, dict) and "type" in evap and len(evap) <= 2:
+                # Legacy shape — single-line emit for back-compat.
+                values = evap.get("values", [])
+                if isinstance(values, list):
+                    values = " ".join(values)
+                file.write(f"{str(evap.get('type', 'CONSTANT')):<12} {values}\n")
+                return
+
+            # Modern keyed shape — one line per entry.
+            for key, value in evap.items():
+                if value == "" or value is None:
+                    continue
+                file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_temperature(self, model: Dict[str, Any], file: TextIO):
+        """Write [TEMPERATURE] section.
+
+        Decoder splits ADC into ``adc_impervious`` / ``adc_pervious``
+        so they don't collide; we re-fan them out as two
+        ``ADC IMPERVIOUS …`` / ``ADC PERVIOUS …`` lines on emit.
+        """
+        if "temperature" not in model or not model["temperature"]:
+            return
+        temp = model["temperature"]
+        if not isinstance(temp, dict):
+            return
+        self._write_section_header(file, "TEMPERATURE")
+        file.write(";;Parameter  Values\n")
+        for key, value in temp.items():
+            if value == "" or value is None:
+                continue
+            if key == "adc_impervious":
+                file.write(f"ADC          IMPERVIOUS {value}\n")
+            elif key == "adc_pervious":
+                file.write(f"ADC          PERVIOUS   {value}\n")
+            elif key.startswith("adc_"):
+                file.write(
+                    f"ADC          {key[4:].upper()} {value}\n"
+                )
+            else:
+                file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_adjustments(self, model: Dict[str, Any], file: TextIO):
+        """Write [ADJUSTMENTS] section."""
+        if "adjustments" not in model or not model["adjustments"]:
+            return
+        adj = model["adjustments"]
+        if not isinstance(adj, dict):
+            return
+        self._write_section_header(file, "ADJUSTMENTS")
+        file.write(";;Parameter  Monthly Values\n")
+        for key, value in adj.items():
+            if value == "" or value is None:
+                continue
+            file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_aquifers(self, model: Dict[str, Any], file: TextIO):
+        """Write [AQUIFERS] section."""
+        if "aquifers" not in model or not model["aquifers"]:
+            return
+        self._write_section_header(file, "AQUIFERS")
+        file.write(
+            ";;Name           Por  WP  FC  HydCon  CondSlp  Tension"
+            "  UpEvap  LosRate  GwHt  WatTab  UpmField\n"
+        )
+        for aq in model["aquifers"]:
+            cols = [
+                self._get_field(aq, "name"),
+                self._get_field(aq, "por"),
+                self._get_field(aq, "wp"),
+                self._get_field(aq, "fc"),
+                self._get_field(aq, "hydcon"),
+                self._get_field(aq, "condslp"),
+                self._get_field(aq, "tension"),
+                self._get_field(aq, "upevap"),
+                self._get_field(aq, "losrate"),
+                self._get_field(aq, "gw_height"),
+                self._get_field(aq, "water_table"),
+            ]
+            line = " ".join(str(c) for c in cols)
+            upm = self._get_field(aq, "upm_field", default="")
+            if upm:
+                line += f" {upm}"
+            file.write(line + "\n")
+
+    def _write_snowpacks(self, model: Dict[str, Any], file: TextIO):
+        """Write [SNOWPACKS] section.
+
+        ``snowpacks`` is ``dict[name -> dict[flavor -> values]]`` with
+        flavors plowable / impervious / pervious / removal. Emit one
+        line per (name, flavor) so all rows for a pack stay grouped.
+        """
+        if "snowpacks" not in model or not model["snowpacks"]:
+            return
+        self._write_section_header(file, "SNOWPACKS")
+        file.write(";;Name           Surface     Parameters\n")
+        for name, flavors in model["snowpacks"].items():
+            if not isinstance(flavors, dict):
+                continue
+            for flavor in ("plowable", "impervious", "pervious", "removal"):
+                values = flavors.get(flavor)
+                if values is None:
+                    continue
+                if isinstance(values, list):
+                    values = " ".join(str(v) for v in values)
+                file.write(f"{name:<16} {flavor.upper():<11} {values}\n")
 
     def _write_raingages(self, model: Dict[str, Any], file: TextIO):
         """Write [RAINGAGES] section."""

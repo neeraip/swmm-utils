@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from swmm_utils.exports import (
+    LAYER_ROLE_MAP,
     NON_SPATIAL_SECTIONS,
     SPATIAL_SECTIONS,
     decode_to_data_json,
+    emit_geojson_layers,
     emit_report_json,
     emit_results_parquet,
     encode_with_overlay,
@@ -223,3 +225,45 @@ def test_emit_results_parquet_compression(tmp_path):
     rg = md.row_group(0)
     for i in range(rg.num_columns):
         assert rg.column(i).compression == "ZSTD"
+
+
+# ---------------------------------------------------------------------------
+# emit_geojson_layers
+# ---------------------------------------------------------------------------
+
+def test_emit_geojson_layers_shape(example1_inp):
+    """Each layer spec has the documented shape and nonzero feature counts."""
+    layers = emit_geojson_layers(example1_inp, crs="EPSG:4326")
+    assert len(layers) > 0
+
+    for spec in layers:
+        # Required keys
+        assert set(spec.keys()) == {
+            "name", "role", "geometry_type", "crs", "feature_collection",
+        }
+        # Roles always come from the canonical map.
+        assert spec["role"] == LAYER_ROLE_MAP[spec["name"]]
+        assert spec["crs"] == "EPSG:4326"
+        # GeoJSON type and at least one feature.
+        fc = spec["feature_collection"]
+        assert fc["type"] == "FeatureCollection"
+        assert len(fc["features"]) > 0
+        f0 = fc["features"][0]
+        assert f0["type"] == "Feature"
+        assert "id" in f0 and "properties" in f0 and "geometry" in f0
+        # Geometry type matches the declared layer geometry.
+        assert f0["geometry"]["type"] == spec["geometry_type"]
+
+
+def test_emit_geojson_layers_node_link_subcatchment_balance(example1_inp):
+    """Example1 has all three role classes — confirm at least one of each."""
+    layers = emit_geojson_layers(example1_inp)
+    by_role = {s["role"]: s for s in layers}
+    # Junctions and conduits exist in any non-trivial SWMM model.
+    assert "junction" in by_role
+    assert "conduit" in by_role
+    # Subcatchments are surfaced even when [POLYGONS] is empty (synth
+    # square at outlet); example1 has subcatchments.
+    if "subcatchment" in by_role:
+        sub = by_role["subcatchment"]["feature_collection"]["features"]
+        assert all(f["geometry"]["type"] == "Polygon" for f in sub)

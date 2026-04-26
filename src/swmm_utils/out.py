@@ -36,6 +36,16 @@ class SwmmOutput:
             self.filepath, include_time_series=load_time_series
         )
 
+    # Context-manager protocol — `with SwmmOutput(...) as out:` is the
+    # convention emit_report_json and other callers use, mirroring
+    # SwmmReport / SwmmInput. The decoder reads the binary end-to-end
+    # during __init__, so __exit__ has no resource to release.
+    def __enter__(self) -> "SwmmOutput":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
     @property
     def version(self) -> str:
         """Get SWMM version string."""

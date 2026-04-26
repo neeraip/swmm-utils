@@ -163,15 +163,18 @@ class SwmmInputDecoder:
             if not line:
                 continue
 
-            # Check for section header
-            section_match = re.match(r"^\[([A-Z_]+)\]$", line)
+            # Check for section header. Real .inp files in the wild
+            # mix case ([POLYGONS] vs [Polygons] vs [polygons]) — the
+            # SWMM engine accepts any, so we do too. Normalize to
+            # UPPERCASE so the dispatch table stays simple.
+            section_match = re.match(r"^\[([A-Za-z_]+)\]$", line)
             if section_match:
                 # Process previous section
                 if self.current_section and section_data:
                     self._process_section(model, self.current_section, section_data)
 
                 # Start new section
-                self.current_section = section_match.group(1)
+                self.current_section = section_match.group(1).upper()
                 section_data = []
                 continue
 
@@ -236,16 +239,130 @@ class SwmmInputDecoder:
         model["options"] = options
 
     def _parse_evaporation(self, model: dict, data: List[str]):
-        """Parse [EVAPORATION] section."""
-        evaporation = {}
+        """Parse [EVAPORATION] section.
+
+        SWMM allows multiple line types in one [EVAPORATION] block — e.g.
+        ``CONSTANT 0.0`` followed by ``DRY_ONLY NO`` and an optional
+        ``RECOVERY some_pat``. Each first token is unique, so we store
+        them as a dict keyed by the lowercased first token; the
+        remainder of the line is space-joined as the value (numeric
+        coercion happens at the editor / encoder boundary). For
+        ``MONTHLY`` and ``FILE`` the value is the 12 monthly figures
+        space-separated.
+        """
+        evaporation: Dict[str, Any] = {}
         for line in data:
             parts = line.split()
-            if parts:
-                evap_type = parts[0]
-                evaporation["type"] = evap_type
-                if len(parts) > 1:
-                    evaporation["values"] = parts[1:]
+            if not parts:
+                continue
+            key = parts[0].lower()
+            value = " ".join(parts[1:]) if len(parts) > 1 else ""
+            evaporation[key] = value
         model["evaporation"] = evaporation
+
+    def _parse_temperature(self, model: dict, data: List[str]):
+        """Parse [TEMPERATURE] section.
+
+        Multi-line block whose first token names the parameter:
+          TIMESERIES name
+          FILE filename startdate
+          WINDSPEED MONTHLY v1 ... v12   |   WINDSPEED FILE
+          SNOWMELT divtemp ATIwt rnmratio elev lat dtgmt
+          ADC IMPERVIOUS f1 f2 ... f10
+          ADC PERVIOUS   f1 f2 ... f10
+
+        ADC has two flavors that share a key — split them into
+        ``adc_impervious`` / ``adc_pervious`` so both round-trip
+        instead of one clobbering the other.
+        """
+        temperature: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            head = parts[0].upper()
+            rest = parts[1:]
+            if head == "ADC" and rest:
+                flavor = rest[0].upper()
+                values = " ".join(rest[1:])
+                if flavor == "IMPERVIOUS":
+                    temperature["adc_impervious"] = values
+                elif flavor == "PERVIOUS":
+                    temperature["adc_pervious"] = values
+                else:
+                    # Unknown ADC flavor — preserve as a generic key so
+                    # the data round-trips even if we don't understand it.
+                    temperature[f"adc_{flavor.lower()}"] = values
+            else:
+                temperature[head.lower()] = " ".join(rest)
+        model["temperature"] = temperature
+
+    def _parse_adjustments(self, model: dict, data: List[str]):
+        """Parse [ADJUSTMENTS] section.
+
+        Each line is one of TEMPERATURE / EVAPORATION / RAINFALL /
+        CONDUCTIVITY followed by 12 monthly values. Stored as a dict
+        keyed by lowercased token with the values space-joined.
+        """
+        adjustments: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            adjustments[parts[0].lower()] = " ".join(parts[1:])
+        model["adjustments"] = adjustments
+
+    def _parse_aquifers(self, model: dict, data: List[str]):
+        """Parse [AQUIFERS] section.
+
+        One row per aquifer:
+          name  por  wp  fc  hydcon  condslp  tension  upevap
+                losrate  gw_height  water_table  [upm_field]
+        """
+        aquifers = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 11:
+                aq = {
+                    "name": parts[0],
+                    "por": parts[1],
+                    "wp": parts[2],
+                    "fc": parts[3],
+                    "hydcon": parts[4],
+                    "condslp": parts[5],
+                    "tension": parts[6],
+                    "upevap": parts[7],
+                    "losrate": parts[8],
+                    "gw_height": parts[9],
+                    "water_table": parts[10],
+                }
+                if len(parts) > 11:
+                    aq["upm_field"] = parts[11]
+                aquifers.append(aq)
+        model["aquifers"] = aquifers
+
+    def _parse_snowpacks(self, model: dict, data: List[str]):
+        """Parse [SNOWPACKS] section.
+
+        Multi-row per pack. Column 2 selects the row flavor:
+          name PLOWABLE   Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name IMPERVIOUS Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name PERVIOUS   Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name REMOVAL    SDplow Fout Fimperv Fperv Fimm Fsubcatch [subcatch]
+
+        Stored as ``dict[name -> dict[flavor_lowered -> param_list]]``
+        so all four rows for one pack stay grouped.
+        """
+        snowpacks: Dict[str, Dict[str, List[str]]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            name = parts[0]
+            flavor = parts[1].lower()
+            values = parts[2:]
+            snowpacks.setdefault(name, {})[flavor] = values
+        model["snowpacks"] = snowpacks
 
     def _parse_raingages(self, model: dict, data: List[str]):
         """Parse [RAINGAGES] section."""

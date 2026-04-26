@@ -126,6 +126,456 @@ def decode_to_data_json(inp_path: PathLike) -> Dict[str, Any]:
     return data
 
 
+# ---------------------------------------------------------------------------
+# .inp → per-role GeoJSON layers
+# ---------------------------------------------------------------------------
+#
+# This is the canonical SWMM .inp → spatial-layer parser. It used to live in
+# NEER's lambda-importer (`app/inp_parser.py`), with a lower-fidelity copy in
+# the console seed script — drift between the two was the motivation for
+# lifting it here. Both the lambda and the seed should call into this helper
+# instead of reimplementing per-element cross-references.
+#
+# Output is GeoJSON FeatureCollection dicts (no shapely / geopandas dep).
+# Callers who want a GeoDataFrame can do:
+#     gpd.GeoDataFrame.from_features(fc["features"], crs=spec["crs"])
+
+# Per-engine layer-name → HydraulicModelRole. Layer names are intentionally
+# capitalized to match the human-readable convention used in the import
+# pipeline; the role enum is the lowercase token persisted in the gis DB.
+LAYER_ROLE_MAP: Dict[str, str] = {
+    "Junctions":     "junction",
+    "Outfalls":      "outfall",
+    "Storage":       "storage",
+    "Dividers":      "divider",
+    "Conduits":      "conduit",
+    "Pumps":         "pump",
+    "Orifices":      "orifice",
+    "Weirs":         "weir",
+    "Outlets":       "outlet",
+    "Subcatchments": "subcatchment",
+}
+
+
+def _sf(val: Any) -> Optional[float]:
+    """Safe float conversion. Returns None if the value can't be coerced."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _link_coords(
+    n1: str,
+    n2: str,
+    link_id: str,
+    coord_map: Dict[str, tuple],
+    vertex_map: Dict[str, List[tuple]],
+) -> Optional[List[List[float]]]:
+    """LineString coordinates: start node → vertices in order → end node.
+
+    Returns None if either endpoint isn't in the coord map (a real model
+    error — engine would refuse to simulate). Vertices for a link with no
+    [VERTICES] rows yields a straight 2-point line.
+    """
+    start = coord_map.get(n1)
+    end = coord_map.get(n2)
+    if not start or not end:
+        return None
+    coords: List[List[float]] = [[start[0], start[1]]]
+    for vx, vy in vertex_map.get(link_id, []):
+        coords.append([vx, vy])
+    coords.append([end[0], end[1]])
+    return coords
+
+
+def emit_geojson_layers(
+    inp_path: PathLike,
+    crs: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Build one GeoJSON FeatureCollection per HydraulicModelRole.
+
+    Cross-references the per-element sibling sections that don't get
+    standalone editors in the console (xsections, losses, subareas,
+    infiltration, coverages, lid_usage, inflows, dwf, tags) onto each
+    feature's properties so the attribute table reflects the full
+    authored .inp.
+
+    Subcatchments without a [POLYGONS] boundary fall back to a small
+    synthesized square at their outlet (sized as 0.05% of the model's
+    coordinate extent) so they still render. Subcatchments without a
+    resolvable outlet are silently dropped — there's nowhere to put
+    them spatially.
+
+    Args:
+        inp_path: Path to a source .inp file.
+        crs: Optional CRS string (e.g. ``"EPSG:2236"``, ``"ESRI:102726"``)
+             stored in each layer spec for downstream reprojection. The
+             coordinate values themselves are never transformed here.
+
+    Returns:
+        List of layer specs:
+            [
+              {
+                "name": "Junctions",
+                "role": "junction",
+                "geometry_type": "Point",
+                "crs": crs,
+                "feature_collection": {
+                  "type": "FeatureCollection",
+                  "features": [...],
+                },
+              },
+              ...
+            ]
+
+        Empty roles are omitted. ``Subcatchments`` is emitted (possibly
+        with empty features list) whenever the model declared any
+        subcatchments at all, so the layer schema stays consistent
+        across imports.
+    """
+    with SwmmInput(Path(inp_path)) as inp:
+        full = inp.to_dict()
+
+    # --- Geometry lookups ---
+    coord_map: Dict[str, tuple] = {}
+    for c in full.get("coordinates", []) or []:
+        nid = str(c.get("name", c.get("node", "")))
+        if nid:
+            try:
+                coord_map[nid] = (float(c["x"]), float(c["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+
+    vertex_map: Dict[str, List[tuple]] = {}
+    for v in full.get("vertices", []) or []:
+        lid = str(v.get("link", v.get("name", "")))
+        if not lid:
+            continue
+        try:
+            vertex_map.setdefault(lid, []).append((float(v["x"]), float(v["y"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    polygon_map: Dict[str, List[tuple]] = {}
+    for p in full.get("polygons", []) or []:
+        sid = str(p.get("subcatchment", p.get("name", "")))
+        if not sid:
+            continue
+        try:
+            polygon_map.setdefault(sid, []).append((float(p["x"]), float(p["y"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    # --- Cross-reference lookups (sibling sections) ---
+    tag_by_id: Dict[str, str] = {}
+    for t in full.get("tags", []) or []:
+        nid = (
+            t.get("name") or t.get("id") or t.get("element_name") or t.get("subject")
+        )
+        tag = t.get("tag") or t.get("value") or t.get("category")
+        if nid is not None and tag is not None:
+            tag_by_id[str(nid)] = str(tag)
+
+    xsection_by_link = {
+        str(x.get("link", x.get("name", ""))): {
+            f"xsection_{k}": v for k, v in x.items() if k not in ("link", "name")
+        }
+        for x in (full.get("xsections", []) or [])
+        if x.get("link") or x.get("name")
+    }
+    losses_by_link = {
+        str(l.get("link", l.get("name", ""))): {
+            f"loss_{k}": v for k, v in l.items() if k not in ("link", "name")
+        }
+        for l in (full.get("losses", []) or [])
+        if l.get("link") or l.get("name")
+    }
+    subareas_by_id = {
+        str(s.get("subcatchment", s.get("name", ""))): {
+            k: v for k, v in s.items() if k not in ("subcatchment", "name")
+        }
+        for s in (full.get("subareas", []) or [])
+        if s.get("subcatchment") or s.get("name")
+    }
+    # The decoder emits this section under "infiltrations" (plural) — the
+    # historical singular alias is also accepted defensively in case an
+    # older blob round-trips through this code path.
+    infiltration_section = (
+        full.get("infiltrations") or full.get("infiltration") or []
+    )
+    infiltration_by_id = {
+        str(i.get("subcatchment", i.get("name", ""))): {
+            f"infil_{k}": v for k, v in i.items() if k not in ("subcatchment", "name")
+        }
+        for i in infiltration_section
+        if i.get("subcatchment") or i.get("name")
+    }
+
+    # Per-node external inflows. Multi-row sections (one per pollutant) are
+    # collapsed to the FLOW row plus a count of additional rows so the
+    # attribute table stays one row per element.
+    inflow_by_id: Dict[str, Dict[str, Any]] = {}
+    for inf in full.get("inflows", []) or []:
+        nid = str(inf.get("node", inf.get("id", "")))
+        if not nid:
+            continue
+        constituent = str(inf.get("constituent", inf.get("type", ""))).upper()
+        if constituent == "FLOW" or nid not in inflow_by_id:
+            inflow_by_id[nid] = {
+                "inflow_constituent": constituent or None,
+                "inflow_timeseries": inf.get("timeseries"),
+                "inflow_type": inf.get("type"),
+                "inflow_mfactor": _sf(inf.get("mfactor")),
+                "inflow_sfactor": _sf(inf.get("sfactor")),
+                "inflow_baseline": _sf(inf.get("baseline")),
+                "inflow_baseline_pattern": inf.get("baseline_pattern"),
+            }
+
+    # Per-node dry-weather flow. Same one-row-per-node summary as inflows.
+    dwf_by_id: Dict[str, Dict[str, Any]] = {}
+    for d in full.get("dwf", []) or []:
+        nid = str(d.get("node", d.get("id", "")))
+        if not nid:
+            continue
+        constituent = str(d.get("constituent", "")).upper()
+        if constituent == "FLOW" or nid not in dwf_by_id:
+            dwf_by_id[nid] = {
+                "dwf_constituent": d.get("constituent"),
+                "dwf_value": _sf(d.get("value", d.get("average"))),
+                "dwf_pattern1": d.get("pattern1"),
+                "dwf_pattern2": d.get("pattern2"),
+                "dwf_pattern3": d.get("pattern3"),
+                "dwf_pattern4": d.get("pattern4"),
+            }
+
+    # [COVERAGES]: one row per (subcatchment, landuse). Summarize as the
+    # dominant landuse + a count so the row stays single-valued.
+    coverages_by_id: Dict[str, Dict[str, Any]] = {}
+    for cv in full.get("coverages", []) or []:
+        sid = str(cv.get("subcatchment", cv.get("name", "")))
+        if not sid:
+            continue
+        landuse = cv.get("landuse")
+        pct = _sf(cv.get("percent")) or 0.0
+        bucket = coverages_by_id.setdefault(
+            sid,
+            {
+                "coverage_dominant_landuse": None,
+                "coverage_dominant_pct": 0.0,
+                "coverage_count": 0,
+            },
+        )
+        bucket["coverage_count"] += 1
+        if pct > bucket["coverage_dominant_pct"]:
+            bucket["coverage_dominant_landuse"] = landuse
+            bucket["coverage_dominant_pct"] = pct
+
+    # [LID_USAGE]: many rows per subcatchment. Roll up into count + first
+    # control name + total area.
+    lid_usage_by_id: Dict[str, Dict[str, Any]] = {}
+    for lu in full.get("lid_usage", []) or []:
+        sid = str(lu.get("subcatchment", lu.get("name", "")))
+        if not sid:
+            continue
+        bucket = lid_usage_by_id.setdefault(
+            sid,
+            {"lid_count": 0, "lid_first_control": None, "lid_total_area": 0.0},
+        )
+        bucket["lid_count"] += 1
+        if bucket["lid_first_control"] is None:
+            bucket["lid_first_control"] = lu.get("lid_control") or lu.get("control")
+        a = _sf(lu.get("area"))
+        if a is not None:
+            bucket["lid_total_area"] += a
+
+    def _enrich_node(row: Dict[str, Any], nid: str) -> Dict[str, Any]:
+        if nid in tag_by_id:
+            row["tag"] = tag_by_id[nid]
+        if nid in inflow_by_id:
+            row.update(inflow_by_id[nid])
+        if nid in dwf_by_id:
+            row.update(dwf_by_id[nid])
+        return row
+
+    def _enrich_link(row: Dict[str, Any], lid: str) -> Dict[str, Any]:
+        if lid in tag_by_id:
+            row["tag"] = tag_by_id[lid]
+        if lid in xsection_by_link:
+            row.update(xsection_by_link[lid])
+        if lid in losses_by_link:
+            row.update(losses_by_link[lid])
+        return row
+
+    def _enrich_subcatchment(row: Dict[str, Any], sid: str) -> Dict[str, Any]:
+        if sid in tag_by_id:
+            row["tag"] = tag_by_id[sid]
+        if sid in subareas_by_id:
+            row.update(subareas_by_id[sid])
+        if sid in infiltration_by_id:
+            row.update(infiltration_by_id[sid])
+        if sid in coverages_by_id:
+            row.update(coverages_by_id[sid])
+        if sid in lid_usage_by_id:
+            row.update(lid_usage_by_id[sid])
+        return row
+
+    layers: List[Dict[str, Any]] = []
+
+    def _layer_spec(
+        name: str, geometry_type: str, features: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        return {
+            "name": name,
+            "role": LAYER_ROLE_MAP[name],
+            "geometry_type": geometry_type,
+            "crs": crs,
+            "feature_collection": {
+                "type": "FeatureCollection",
+                "features": features,
+            },
+        }
+
+    def _node_features(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            nid = str(r.get("name", ""))
+            xy = coord_map.get(nid)
+            if not xy:
+                continue
+            row = _enrich_node({**r, "name": nid}, nid)
+            out.append(
+                {
+                    "type": "Feature",
+                    "id": nid,
+                    "properties": row,
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [xy[0], xy[1]],
+                    },
+                }
+            )
+        return out
+
+    def _link_features(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            lid = str(r.get("name", ""))
+            n1 = str(r.get("from_node", ""))
+            n2 = str(r.get("to_node", ""))
+            coords = _link_coords(n1, n2, lid, coord_map, vertex_map)
+            if not coords or len(coords) < 2:
+                continue
+            row = _enrich_link(
+                {**r, "name": lid, "from_node": n1, "to_node": n2}, lid
+            )
+            out.append(
+                {
+                    "type": "Feature",
+                    "id": lid,
+                    "properties": row,
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coords,
+                    },
+                }
+            )
+        return out
+
+    # --- Nodes ---
+    junctions = _node_features(full.get("junctions", []) or [])
+    if junctions:
+        layers.append(_layer_spec("Junctions", "Point", junctions))
+
+    outfalls = _node_features(full.get("outfalls", []) or [])
+    if outfalls:
+        layers.append(_layer_spec("Outfalls", "Point", outfalls))
+
+    storage = _node_features(full.get("storage", []) or [])
+    if storage:
+        layers.append(_layer_spec("Storage", "Point", storage))
+
+    dividers = _node_features(full.get("dividers", []) or [])
+    if dividers:
+        layers.append(_layer_spec("Dividers", "Point", dividers))
+
+    # --- Links ---
+    conduits = _link_features(full.get("conduits", []) or [])
+    if conduits:
+        layers.append(_layer_spec("Conduits", "LineString", conduits))
+
+    for section_key, name in (
+        ("pumps", "Pumps"),
+        ("weirs", "Weirs"),
+        ("orifices", "Orifices"),
+        ("outlets", "Outlets"),
+    ):
+        feats = _link_features(full.get(section_key, []) or [])
+        if feats:
+            layers.append(_layer_spec(name, "LineString", feats))
+
+    # --- Subcatchments ---
+    subcatchments_section = full.get("subcatchments", []) or []
+    if subcatchments_section:
+        # Synth-square sizing: 0.05% of the model's coordinate extent so it
+        # works in any CRS (state plane feet, UTM meters, lat/lon degrees).
+        if coord_map:
+            xs = [xy[0] for xy in coord_map.values()]
+            ys = [xy[1] for xy in coord_map.values()]
+            extent = max(max(xs) - min(xs), max(ys) - min(ys))
+            synth_half = max(extent * 0.0005, 1e-6)
+        else:
+            synth_half = 1.0
+
+        sub_feats: List[Dict[str, Any]] = []
+        for sc in subcatchments_section:
+            sid = str(sc.get("name", ""))
+            if not sid:
+                continue
+
+            ring = polygon_map.get(sid)
+            geometry: Optional[Dict[str, Any]] = None
+            if ring and len(ring) >= 3:
+                ring_coords = [[x, y] for x, y in ring]
+                if ring_coords[0] != ring_coords[-1]:
+                    ring_coords.append(ring_coords[0])
+                geometry = {"type": "Polygon", "coordinates": [ring_coords]}
+            else:
+                outlet = str(sc.get("outlet", ""))
+                xy = coord_map.get(outlet) if outlet else None
+                if xy:
+                    x, y = xy
+                    geometry = {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [x - synth_half, y - synth_half],
+                            [x + synth_half, y - synth_half],
+                            [x + synth_half, y + synth_half],
+                            [x - synth_half, y + synth_half],
+                            [x - synth_half, y - synth_half],
+                        ]],
+                    }
+
+            if geometry is None:
+                continue
+
+            row = _enrich_subcatchment({**sc, "name": sid}, sid)
+            sub_feats.append(
+                {
+                    "type": "Feature",
+                    "id": sid,
+                    "properties": row,
+                    "geometry": geometry,
+                }
+            )
+
+        layers.append(_layer_spec("Subcatchments", "Polygon", sub_feats))
+
+    return layers
+
+
 def encode_with_overlay(
     source_inp_path: PathLike,
     data_overlay: Dict[str, Any],
