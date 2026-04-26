@@ -270,7 +270,7 @@ def test_emit_geojson_layers_node_link_subcatchment_balance(example1_inp):
 
 
 # ---------------------------------------------------------------------------
-# New section handlers + cross-references (PCSWMM gap closure)
+# New section handlers + cross-references
 # ---------------------------------------------------------------------------
 
 SYNTHETIC_INP_WITH_NEW_SECTIONS = """[TITLE]
@@ -377,8 +377,8 @@ def test_new_section_round_trip(synth_inp_path):
             f"{key} did not round-trip cleanly"
 
 
-def test_emit_geojson_layers_pcswmm_parity(synth_inp_path):
-    """Layer enrichments cover the high-value PCSWMM authoring fields:
+def test_emit_geojson_layers_authoring_field_coverage(synth_inp_path):
+    """Layer enrichments cover the high-value authoring fields:
     rim_elev, slope, in_ctrl, treatment_*, gw_*, inlet_*, infil_model,
     rdii_* (when present), lid_names (when present)."""
     layers = emit_geojson_layers(synth_inp_path, crs="EPSG:4326")

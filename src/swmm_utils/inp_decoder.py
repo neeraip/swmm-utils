@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, TextIO, Union
+from typing import Any, Dict, List, Optional, TextIO, Union
 
 
 class SwmmInputDecoder:
@@ -144,83 +144,150 @@ class SwmmInputDecoder:
     def _parse_to_dict(self, file: TextIO) -> Dict:
         """Parse SWMM input file to dictionary format.
 
-        Args:
-            file: File object to read from
-
-        Returns:
-            Dictionary with parsed SWMM data
+        Description capture:
+          - Standalone ``;`` lines preceding a data row become that
+            row's ``description`` field. Multiple consecutive ``;`` lines
+            are joined with newlines.
+          - Inline ``; comment`` after data on the same line is captured
+            as the row's ``description`` if no preceding standalone
+            ``;`` line exists.
+          - ``;;`` (double-semicolon) column-header / divider lines are
+            ignored — they're never per-row descriptions.
+          - A blank line clears any pending description.
         """
-        model = {}
+        model: Dict[str, Any] = {}
         self.current_section = None
         self.line_number = 0
-        section_data = []
+        section_data: List[str] = []
+        section_desc: List[str] = []
+        pending_desc: List[str] = []
 
-        for line in file:
+        for raw in file:
             self.line_number += 1
-            line = self._preprocess_line(line)
+            stripped_full = raw.strip()
 
-            # Skip empty lines
-            if not line:
+            # Blank line → clears pending description (so a description
+            # block doesn't bleed across element rows separated by spacing).
+            if not stripped_full:
+                pending_desc = []
                 continue
 
-            # Check for section header. Real .inp files in the wild
-            # mix case ([POLYGONS] vs [Polygons] vs [polygons]) — the
-            # SWMM engine accepts any, so we do too. Normalize to
-            # UPPERCASE so the dispatch table stays simple.
-            section_match = re.match(r"^\[([A-Za-z_]+)\]$", line)
-            if section_match:
-                # Process previous section
-                if self.current_section and section_data:
-                    self._process_section(model, self.current_section, section_data)
+            # Column-header / divider lines (`;;`).
+            if stripped_full.startswith(";;"):
+                continue
 
-                # Start new section
+            # Standalone description line (`;<text>`).
+            if stripped_full.startswith(";"):
+                pending_desc.append(stripped_full[1:].strip())
+                continue
+
+            # Section header. Real .inp files in the wild mix case
+            # ([POLYGONS] vs [Polygons] vs [polygons]) — the SWMM engine
+            # accepts any, so we do too. Normalize to UPPERCASE so the
+            # dispatch table stays simple.
+            section_match = re.match(r"^\[([A-Za-z_]+)\]$", stripped_full)
+            if section_match:
+                if self.current_section and section_data:
+                    self._process_section(
+                        model, self.current_section, section_data, section_desc
+                    )
                 self.current_section = section_match.group(1).upper()
                 section_data = []
+                section_desc = []
+                pending_desc = []
                 continue
 
-            # Add data to current section
-            if self.current_section:
-                section_data.append(line)
+            # Data row (possibly with a trailing `; comment`).
+            data_part, inline_desc = self._split_inline_comment(stripped_full)
+            if not data_part:
+                # Whole row was just an inline-comment after stripped text —
+                # treat as a description for the next data row.
+                if inline_desc:
+                    pending_desc.append(inline_desc)
+                continue
 
-        # Process final section
+            # Preceding `;` lines win over inline comments. Most authors
+            # use one or the other; if both are present the standalone
+            # text is usually the more deliberate description.
+            desc = "\n".join(pending_desc) if pending_desc else inline_desc
+            pending_desc = []
+
+            if self.current_section:
+                section_data.append(data_part)
+                section_desc.append(desc)
+
         if self.current_section and section_data:
-            self._process_section(model, self.current_section, section_data)
+            self._process_section(
+                model, self.current_section, section_data, section_desc
+            )
 
         return model
 
     def _preprocess_line(self, line: str) -> str:
         """Preprocess a line by removing comments and whitespace.
 
-        Args:
-            line: Raw line from file
-
-        Returns:
-            Cleaned line or empty string
+        Kept for backward compatibility with any external callers; the
+        main parse path now calls ``_split_inline_comment`` so that
+        descriptions can be captured rather than discarded.
         """
-        # Remove comments
         if ";" in line:
             line = line[: line.index(";")]
+        return line.strip()
 
-        # Strip whitespace
-        line = line.strip()
+    @staticmethod
+    def _split_inline_comment(line: str) -> "tuple[str, str]":
+        """Split a single line into (data, inline_comment).
 
-        return line
+        The first ``;`` separates the engine-relevant data from a
+        description — neither side is processed further here, just
+        stripped of surrounding whitespace.
+        """
+        if ";" not in line:
+            return line.strip(), ""
+        idx = line.index(";")
+        return line[:idx].strip(), line[idx + 1:].strip()
 
-    def _process_section(self, model: dict, section: str, data: List[str]):
+    def _process_section(
+        self,
+        model: dict,
+        section: str,
+        data: List[str],
+        descriptions: Optional[List[str]] = None,
+    ):
         """Process a section and add to model.
 
-        Args:
-            model: SwmmModel to populate
-            section: Section name
-            data: List of data lines
+        After the section handler runs, if it emitted a ``list[dict]`` of
+        the same length as ``descriptions`` and any description is
+        non-empty, attach it to the corresponding row's ``description``
+        field. Sections that emit dicts (options, times, report) drop
+        descriptions silently — they don't have per-row semantics.
         """
         handler_name = f"_parse_{section.lower()}"
         handler = getattr(self, handler_name, None)
 
-        if handler is not None:
-            handler(model, data)  # type: ignore
-        else:
+        if handler is None:
             print(f"Warning: No handler for section [{section}]")
+            return
+
+        keys_before = set(model.keys())
+        handler(model, data)  # type: ignore
+
+        if not descriptions or not any(descriptions):
+            return
+
+        # Find the key(s) the handler wrote. Most write a single new key
+        # under the section name (or its plural, e.g. infiltration ->
+        # infiltrations). Track set diff so we don't depend on the
+        # naming convention.
+        new_keys = set(model.keys()) - keys_before
+        if not new_keys and section.lower() in model:
+            new_keys = {section.lower()}
+        for key in new_keys:
+            value = model[key]
+            if isinstance(value, list) and len(value) == len(descriptions):
+                for i, row in enumerate(value):
+                    if isinstance(row, dict) and descriptions[i]:
+                        row["description"] = descriptions[i]
 
     # Section-specific parsers
 

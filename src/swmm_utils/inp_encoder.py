@@ -327,6 +327,23 @@ class SwmmInputEncoder:
                     return value
         return default
 
+    @staticmethod
+    def _maybe_write_description(file: TextIO, row: Dict[str, Any]) -> None:
+        """Emit a leading ``;<desc>`` line for a row when it carries one.
+
+        Decoder captures preceding/inline ``;`` text into ``description``;
+        we round-trip it as a standalone comment line so any consumer
+        that follows the same convention reads the same description
+        back. The SWMM engine itself ignores comments. Multi-line
+        descriptions are emitted as one ``;`` line per physical line —
+        matches how authors usually wrote them in the first place.
+        """
+        desc = row.get("description")
+        if not desc:
+            return
+        for line in str(desc).split("\n"):
+            file.write(f";{line}\n")
+
     def _write_title(self, model: Dict[str, Any], file: TextIO):
         """Write [TITLE] section."""
         if "title" in model and model["title"]:
@@ -509,6 +526,7 @@ class SwmmInputEncoder:
                 curb_length = self._get_field(sub, "curb_length", "curb_len", default=0)
                 snowpack = self._get_field(sub, "snowpack", "snow_pack")
 
+                self._maybe_write_description(file, sub)
                 file.write(
                     f"{name:<16} {raingage:<16} {outlet:<16} "
                     f"{area:<8} {imperv:<8} {width:<8} "
@@ -594,6 +612,7 @@ class SwmmInputEncoder:
                     junc, "ponded_area", "pondedArea", default="0"
                 )
 
+                self._maybe_write_description(file, junc)
                 file.write(
                     f"{name:<16} {elevation:<10} {max_depth:<10} "
                     f"{init_depth:<10} {surcharge_depth:<10} {ponded_area}\n"
@@ -617,6 +636,7 @@ class SwmmInputEncoder:
                 gated = self._get_field(outfall, "gated", default="NO")
                 route_to = self._get_field(outfall, "route_to", "routeTo", default="")
 
+                self._maybe_write_description(file, outfall)
                 file.write(
                     f"{name:<16} {elevation:<10} {outfall_type:<10} "
                     f"{stage_data:<16} {gated:<8} {route_to}\n"
@@ -645,6 +665,7 @@ class SwmmInputEncoder:
                 curve_params = storage.get("curve_params", [])
                 params = " ".join(curve_params) if curve_params else ""
 
+                self._maybe_write_description(file, storage)
                 file.write(
                     f"{name:<16} {elevation:<8} {max_depth:<10} "
                     f"{init_depth:<10} {curve_type:<10} {params}\n"
@@ -671,6 +692,7 @@ class SwmmInputEncoder:
                 init_flow = self._get_field(conduit, "init_flow", "initFlow", default=0)
                 max_flow = self._get_field(conduit, "max_flow", "maxFlow", default=0)
 
+                self._maybe_write_description(file, conduit)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{length:<10} {roughness:<10} {in_offset:<10} "
@@ -694,6 +716,7 @@ class SwmmInputEncoder:
                 startup = self._get_field(pump, "startup", default="0")
                 shutoff = self._get_field(pump, "shutoff", default="0")
 
+                self._maybe_write_description(file, pump)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{curve:<16} {status:<8} {startup:<6} {shutoff}\n"
@@ -721,6 +744,7 @@ class SwmmInputEncoder:
                     orifice, "close_time", "closeTime", default="0"
                 )
 
+                self._maybe_write_description(file, orifice)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{orifice_type:<12} {offset:<10} {discharge_coeff:<10} "
@@ -755,6 +779,7 @@ class SwmmInputEncoder:
                 )
                 road_surf = self._get_field(weir, "road_surf", "roadSurf", default="")
 
+                self._maybe_write_description(file, weir)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{weir_type:<12} {crest_height:<10} {discharge_coeff:<10} "
@@ -999,6 +1024,7 @@ class SwmmInputEncoder:
                 )
                 gated = self._get_field(outlet, "gated", default="NO")
 
+                self._maybe_write_description(file, outlet)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{offset:<10} {outlet_type:<12} {curve_name:<16} {gated}\n"

@@ -5,9 +5,9 @@ artifacts from SWMM .inp / .rpt / .out files.
 Mirrors `epanet_utils.exports`. SWMM-specific differences:
 - Subcatchments are a third role alongside nodes and links.
 - Pollutants are dynamic — one metric per pollutant defined in the model.
-- The SWMM 1D vs 2D distinction is a PCSWMM authoring convention captured
-  in the [TAGS] section; the engine treats both identically. We don't
-  branch on it here.
+- The SWMM 1D vs 2D distinction is an authoring convention captured in
+  the [TAGS] section by some external GUIs; the engine treats both
+  identically. We don't branch on it here.
 
 Helpers:
 - decode_to_data_json    — split an .inp into spatial vs editable non-spatial
@@ -374,8 +374,8 @@ def emit_geojson_layers(
             bucket["coverage_dominant_pct"] = pct
 
     # [LID_USAGE]: many rows per subcatchment. Roll up into count + first
-    # control name + total area + comma-joined names (PCSWMM exposes the
-    # name list as ``LIDNAMES``; we mirror the convention).
+    # control name + total area + comma-joined names so consumers can
+    # render the full set without re-aggregating.
     lid_usage_by_id: Dict[str, Dict[str, Any]] = {}
     for lu in full.get("lid_usage", []) or []:
         sid = str(lu.get("subcatchment", lu.get("name", "")))
