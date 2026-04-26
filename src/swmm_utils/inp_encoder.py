@@ -76,6 +76,7 @@ class SwmmInputEncoder:
         self._write_junctions(model, file)
         self._write_outfalls(model, file)
         self._write_storage(model, file)
+        self._write_dividers(model, file)
         self._write_conduits(model, file)
         self._write_pumps(model, file)
         self._write_orifices(model, file)
@@ -670,6 +671,40 @@ class SwmmInputEncoder:
                     f"{name:<16} {elevation:<8} {max_depth:<10} "
                     f"{init_depth:<10} {curve_type:<10} {params}\n"
                 )
+
+    def _write_dividers(self, model: Dict[str, Any], file: TextIO):
+        """Write [DIVIDERS] section.
+
+        Per-type ``params`` count (CUTOFF=1, OVERFLOW=0, TABULAR=1,
+        WEIR=3) restored from the decoder's ``params`` list. Common
+        trailing fields (max_depth / init_depth / surcharge_depth /
+        ponded_area) are emitted only when present so we don't
+        manufacture defaults the source didn't carry.
+        """
+        if "dividers" not in model or not model["dividers"]:
+            return
+        self._write_section_header(file, "DIVIDERS")
+        file.write(
+            ";;Name           Elevation  DivertedLink  Type       Params"
+            "  MaxDepth  InitDepth  SurchargeDepth  PondedArea\n"
+        )
+        for d in model["dividers"]:
+            self._maybe_write_description(file, d)
+            cols = [
+                self._get_field(d, "name"),
+                self._get_field(d, "elevation", default="0"),
+                self._get_field(d, "diverted_link", default=""),
+                self._get_field(d, "type", default="OVERFLOW"),
+            ]
+            params = d.get("params") or []
+            if isinstance(params, list):
+                cols.extend(str(p) for p in params)
+            for key in ("max_depth", "init_depth",
+                        "surcharge_depth", "ponded_area"):
+                v = self._get_field(d, key, default="")
+                if v != "":
+                    cols.append(str(v))
+            file.write(" ".join(str(c) for c in cols) + "\n")
 
     def _write_conduits(self, model: Dict[str, Any], file: TextIO):
         """Write [CONDUITS] section."""

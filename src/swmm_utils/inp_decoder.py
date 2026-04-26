@@ -561,6 +561,52 @@ class SwmmInputDecoder:
                 storage_nodes.append(storage)
         model["storage"] = storage_nodes
 
+    def _parse_dividers(self, model: dict, data: List[str]):
+        """Parse [DIVIDERS] section.
+
+        SWMM 5.2 row:
+          ``name elevation diverted_link type [args] max_depth init_depth surcharge_depth ponded_area``
+
+        ``type`` is one of CUTOFF / OVERFLOW / TABULAR / WEIR. Each
+        type has different number of `args`:
+          CUTOFF   <Q_min>
+          OVERFLOW                  (no args)
+          TABULAR  <curve_name>
+          WEIR     <Q_min> <h_max> <coefficient>
+
+        We only normalize the canonical fields (name / elevation /
+        diverted_link / type) and pass the type-specific args through
+        in a generic ``params`` list. Trailing depth / aponded columns
+        live AFTER the args, so we anchor them by counting from the
+        right rather than positional indexing.
+        """
+        dividers = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            entry: Dict[str, Any] = {
+                "name": parts[0],
+                "elevation": parts[1],
+                "diverted_link": parts[2],
+                "type": parts[3].upper(),
+            }
+            # Per-type arg count (per SWMM 5.2 [DIVIDERS] spec):
+            arg_counts = {"CUTOFF": 1, "OVERFLOW": 0, "TABULAR": 1, "WEIR": 3}
+            n_args = arg_counts.get(entry["type"], 0)
+            args_end = 4 + n_args
+            entry["params"] = parts[4:args_end]
+            tail = parts[args_end:]
+            # Trailing common-node columns (max_depth / init_depth /
+            # surcharge_depth / ponded_area). All optional; pad rather
+            # than guess so unknown columns aren't misnamed.
+            tail_keys = ("max_depth", "init_depth", "surcharge_depth", "ponded_area")
+            for i, key in enumerate(tail_keys):
+                if i < len(tail):
+                    entry[key] = tail[i]
+            dividers.append(entry)
+        model["dividers"] = dividers
+
     def _parse_conduits(self, model: dict, data: List[str]):
         """Parse [CONDUITS] section."""
         conduits = []

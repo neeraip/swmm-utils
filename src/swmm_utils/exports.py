@@ -144,6 +144,8 @@ def decode_to_data_json(inp_path: PathLike) -> Dict[str, Any]:
 # capitalized to match the human-readable convention used in the import
 # pipeline; the role enum is the lowercase token persisted in the gis DB.
 LAYER_ROLE_MAP: Dict[str, str] = {
+    "Rain Gages":    "raingage",
+    "Subcatchments": "subcatchment",
     "Junctions":     "junction",
     "Outfalls":      "outfall",
     "Storage":       "storage",
@@ -153,7 +155,6 @@ LAYER_ROLE_MAP: Dict[str, str] = {
     "Orifices":      "orifice",
     "Weirs":         "weir",
     "Outlets":       "outlet",
-    "Subcatchments": "subcatchment",
 }
 
 
@@ -646,39 +647,46 @@ def emit_geojson_layers(
             )
         return out
 
-    # --- Nodes ---
-    junctions = _node_features(full.get("junctions", []) or [])
-    if junctions:
-        layers.append(_layer_spec("Junctions", "Point", junctions))
+    # Layer emit order matches console's SWMM_CANONICAL_LAYERS so the
+    # from-scratch and import flows surface the same layer sequence:
+    #   Rain Gages → Subcatchments → Junctions → Outfalls → Storage →
+    #   Dividers → Conduits → Pumps → Orifices → Weirs → Outlets.
 
-    outfalls = _node_features(full.get("outfalls", []) or [])
-    if outfalls:
-        layers.append(_layer_spec("Outfalls", "Point", outfalls))
+    # --- Rain Gages (point) ---
+    raingages_section = full.get("raingages", []) or []
+    if raingages_section:
+        # Geometry comes from [SYMBOLS] (gage name → x,y). The decoder
+        # writes that as ``symbols: list[{gage, x, y}]``.
+        gage_xy: Dict[str, tuple] = {}
+        for sym in full.get("symbols", []) or []:
+            gid = str(sym.get("gage", sym.get("name", "")))
+            if not gid:
+                continue
+            try:
+                gage_xy[gid] = (float(sym["x"]), float(sym["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        rain_feats: List[Dict[str, Any]] = []
+        for r in raingages_section:
+            rid = str(r.get("name", ""))
+            xy = gage_xy.get(rid)
+            if not xy:
+                # Raingages with no [SYMBOLS] entry have no spatial
+                # reference — skip rather than guess. The canonical
+                # Rain Gages layer can still exist (empty) for users
+                # to add gage symbols later.
+                continue
+            row = _enrich_node({**r, "name": rid}, rid)
+            rain_feats.append({
+                "type": "Feature",
+                "id": rid,
+                "properties": row,
+                "geometry": {"type": "Point", "coordinates": [xy[0], xy[1]]},
+            })
+        if rain_feats:
+            layers.append(_layer_spec("Rain Gages", "Point", rain_feats))
 
-    storage = _node_features(full.get("storage", []) or [])
-    if storage:
-        layers.append(_layer_spec("Storage", "Point", storage))
-
-    dividers = _node_features(full.get("dividers", []) or [])
-    if dividers:
-        layers.append(_layer_spec("Dividers", "Point", dividers))
-
-    # --- Links ---
-    conduits = _link_features(full.get("conduits", []) or [])
-    if conduits:
-        layers.append(_layer_spec("Conduits", "LineString", conduits))
-
-    for section_key, name in (
-        ("pumps", "Pumps"),
-        ("weirs", "Weirs"),
-        ("orifices", "Orifices"),
-        ("outlets", "Outlets"),
-    ):
-        feats = _link_features(full.get(section_key, []) or [])
-        if feats:
-            layers.append(_layer_spec(name, "LineString", feats))
-
-    # --- Subcatchments ---
+    # --- Subcatchments (polygon) ---
     subcatchments_section = full.get("subcatchments", []) or []
     if subcatchments_section:
         # Synth-square sizing: 0.05% of the model's coordinate extent so it
@@ -734,6 +742,38 @@ def emit_geojson_layers(
             )
 
         layers.append(_layer_spec("Subcatchments", "Polygon", sub_feats))
+
+    # --- Nodes (point) ---
+    junctions = _node_features(full.get("junctions", []) or [])
+    if junctions:
+        layers.append(_layer_spec("Junctions", "Point", junctions))
+
+    outfalls = _node_features(full.get("outfalls", []) or [])
+    if outfalls:
+        layers.append(_layer_spec("Outfalls", "Point", outfalls))
+
+    storage = _node_features(full.get("storage", []) or [])
+    if storage:
+        layers.append(_layer_spec("Storage", "Point", storage))
+
+    dividers = _node_features(full.get("dividers", []) or [])
+    if dividers:
+        layers.append(_layer_spec("Dividers", "Point", dividers))
+
+    # --- Links (line) ---
+    conduits = _link_features(full.get("conduits", []) or [])
+    if conduits:
+        layers.append(_layer_spec("Conduits", "LineString", conduits))
+
+    for section_key, name in (
+        ("pumps", "Pumps"),
+        ("orifices", "Orifices"),
+        ("weirs", "Weirs"),
+        ("outlets", "Outlets"),
+    ):
+        feats = _link_features(full.get(section_key, []) or [])
+        if feats:
+            layers.append(_layer_spec(name, "LineString", feats))
 
     return layers
 
