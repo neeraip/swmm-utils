@@ -90,6 +90,22 @@ prefix (`xsection_`, `loss_`, `dwf_`, `inflow_`, `infil_`, `coverage_`,
   "dwf_pattern2":    "...",
   "dwf_pattern3":    "...",
   "dwf_pattern4":    "...",
+
+  // [RDII] (when assigned)
+  "rdii_unithydrograph": "UH1",
+  "rdii_sewer_area":     2.5,
+  "rdii_factor":         1.0,
+
+  // [TREATMENT] — multi-row collapse (one row per pollutant). The
+  // first pollutant + its function is surfaced; treatment_count gives
+  // the total number of rows so consumers know there are more.
+  "treatment_count":    2,
+  "treatment_pollutant": "TSS",
+  "treatment_function":  "R = 0.5*R_TSS",
+
+  // Computed
+  "rim_elev": 110,        // = elevation + max_depth
+  "in_ctrl":  false,      // appears as a token in any [CONTROLS] rule
 }
 ```
 
@@ -128,14 +144,29 @@ prefix (`xsection_`, `loss_`, `dwf_`, `inflow_`, `infil_`, `coverage_`,
   "loss_average":   "0",
   "loss_flap_gate": "NO",
   "loss_seepage":   "0",
+
+  // [INLET_USAGE] (SWMM 5.2 — when this conduit is assigned an inlet)
+  "inlet_name":         "GRATE_30",
+  "inlet_node":         "J3",       // node receiving captured flow
+  "inlet_pct_clogged":  5.0,
+  "inlet_max_flow":     0.0,
+  "inlet_h_dstore":     0.0,
+  "inlet_w_dstore":     0.0,
+  "inlet_placement":    "ON_GRADE",
+
+  // Computed
+  "slope":   0.005,        // = (from_invert + in_offset - to_invert - out_offset) / length
+  "in_ctrl": false,        // appears as a token in any [CONTROLS] rule
 }
 ```
 
 ### pump / orifice / weir / outlet
 
 Same shape as conduit (link geometry, `from_node`/`to_node`,
-`tag`/`xsection_*`/`loss_*` cross-refs). Each section's columns are
-preserved verbatim plus the cross-refs.
+`tag`/`xsection_*`/`loss_*`/`inlet_*` cross-refs + computed `in_ctrl`).
+Each section's columns are preserved verbatim plus the cross-refs.
+`slope` is conduit-specific (other links don't carry length / offsets
+in the form the formula expects).
 
 ### subcatchment
 
@@ -175,7 +206,28 @@ preserved verbatim plus the cross-refs.
   // [LID_USAGE] — collapsed.
   "lid_count":         2,
   "lid_first_control": "BIO_RETENTION",
+  "lid_names":         "BIO_RETENTION,GREEN_ROOF",  // unique names, comma-joined
   "lid_total_area":    50.0,
+
+  // [GROUNDWATER] — every column on the row, prefixed gw_*.
+  "gw_aquifer":      "AQ1",
+  "gw_node":         "J1",
+  "gw_surface_elev": "100",
+  "gw_a1":           "0.001",
+  "gw_b1":           "1.5",
+  "gw_a2":           "0",
+  "gw_b2":           "0",
+  "gw_a3":           "0",
+  "gw_dsw":          "0",
+  "gw_egwt":         "*",
+  "gw_ebot":         "90",
+  "gw_wgr":          "0.5",
+  "gw_umc":          "0.3",
+
+  // From OPTIONS.INFILTRATION — disambiguates the generic
+  // infil_param1..5 columns above (HORTON / GREEN_AMPT / CURVE_NUMBER /
+  // MODIFIED_HORTON / MODIFIED_GREEN_AMPT).
+  "infil_model": "HORTON",
 }
 ```
 

@@ -267,3 +267,151 @@ def test_emit_geojson_layers_node_link_subcatchment_balance(example1_inp):
     if "subcatchment" in by_role:
         sub = by_role["subcatchment"]["feature_collection"]["features"]
         assert all(f["geometry"]["type"] == "Polygon" for f in sub)
+
+
+# ---------------------------------------------------------------------------
+# New section handlers + cross-references (PCSWMM gap closure)
+# ---------------------------------------------------------------------------
+
+SYNTHETIC_INP_WITH_NEW_SECTIONS = """[TITLE]
+test
+[OPTIONS]
+INFILTRATION HORTON
+[JUNCTIONS]
+J1 100 10 0 0 0
+J2 95 8 0 0 0
+[OUTFALLS]
+O1 90 FREE
+[CONDUITS]
+C1 J1 J2 100 0.013 0 0 0
+C2 J2 O1 50 0.013 0 0 0
+[XSECTIONS]
+C1 CIRCULAR 1 0 0 0
+C2 CIRCULAR 1 0 0 0
+[SUBCATCHMENTS]
+S1 RG1 J1 5 50 100 1 0
+[SUBAREAS]
+S1 0.01 0.1 0.05 0.05 25 OUTLET
+[INFILTRATION]
+S1 3 0.5 4 7 0
+[TREATMENT]
+J2 TSS R = 0.5*R_TSS
+J2 BOD R = 0.7*R_BOD
+[GROUNDWATER]
+S1 AQ1 J1 100 0.001 1.5 0.0 0.0 0.0 0 * 90 0.5 0.3
+[STREETS]
+ST1 0.05 0.5 0.02 0.016 2.0 1.0 2
+[INLETS]
+INLET1 GRATE 2.0 0.5 P_30
+[INLET_USAGE]
+C1 INLET1 J2 5 0 0 0 ON_GRADE
+[CONTROLS]
+RULE R1
+IF NODE J1 DEPTH > 5
+THEN LINK C1 STATUS = CLOSED
+[RAINGAGES]
+RG1 INTENSITY 0:05 1.0 TIMESERIES TS1
+[COORDINATES]
+J1 0 0
+J2 100 0
+O1 150 0
+[POLYGONS]
+S1 -10 -10
+S1 10 -10
+S1 10 10
+S1 -10 10
+"""
+
+
+@pytest.fixture
+def synth_inp_path(tmp_path) -> Path:
+    p = tmp_path / "synth.inp"
+    p.write_text(SYNTHETIC_INP_WITH_NEW_SECTIONS)
+    return p
+
+
+def test_new_section_decoders(synth_inp_path):
+    """Newly-added sections decode into structured shapes."""
+    from swmm_utils.inp_decoder import SwmmInputDecoder
+
+    m = SwmmInputDecoder().decode_file(str(synth_inp_path))
+
+    # [TREATMENT] — list of {node, pollutant, function}
+    assert m["treatment"] == [
+        {"node": "J2", "pollutant": "TSS", "function": "R = 0.5*R_TSS"},
+        {"node": "J2", "pollutant": "BOD", "function": "R = 0.7*R_BOD"},
+    ]
+    # [GROUNDWATER] — list of {subcatchment, aquifer, node, surface_elev, a1..umc}
+    assert len(m["groundwater"]) == 1
+    gw = m["groundwater"][0]
+    assert gw["subcatchment"] == "S1"
+    assert gw["aquifer"] == "AQ1"
+    assert gw["a1"] == "0.001"
+    assert gw["umc"] == "0.3"
+    # [STREETS] — dict[name -> params]
+    assert "ST1" in m["streets"]
+    assert m["streets"]["ST1"]["sx"] == "0.02"
+    # [INLETS] — dict[name -> list[{type, params}]]
+    assert "INLET1" in m["inlets"]
+    assert m["inlets"]["INLET1"][0]["type"] == "GRATE"
+    # [INLET_USAGE] — list of {conduit, inlet, node, ...}
+    assert m["inlet_usage"][0]["conduit"] == "C1"
+    assert m["inlet_usage"][0]["pct_clogged"] == "5"
+
+
+def test_new_section_round_trip(synth_inp_path):
+    """decode → encode → decode preserves all new sections cleanly."""
+    from swmm_utils.inp_decoder import SwmmInputDecoder
+    from swmm_utils.inp_encoder import SwmmInputEncoder
+    import io
+
+    d = SwmmInputDecoder()
+    e = SwmmInputEncoder()
+    m1 = d.decode_file(str(synth_inp_path))
+    buf = io.StringIO()
+    e.encode_to_inp(m1, buf)
+    m2 = d.decode(io.StringIO(buf.getvalue()))
+
+    for key in ("treatment", "groundwater", "streets", "inlets", "inlet_usage"):
+        assert m1.get(key) == m2.get(key), \
+            f"{key} did not round-trip cleanly"
+
+
+def test_emit_geojson_layers_pcswmm_parity(synth_inp_path):
+    """Layer enrichments cover the high-value PCSWMM authoring fields:
+    rim_elev, slope, in_ctrl, treatment_*, gw_*, inlet_*, infil_model,
+    rdii_* (when present), lid_names (when present)."""
+    layers = emit_geojson_layers(synth_inp_path, crs="EPSG:4326")
+    by_role = {s["role"]: s for s in layers}
+
+    # Junction J2 — has [TREATMENT] rows, in [CONTROLS] but not directly
+    # by name (only J1 is referenced), invert + max_depth set so rim_elev.
+    j_feats = by_role["junction"]["feature_collection"]["features"]
+    j2 = next(f for f in j_feats if f["id"] == "J2")
+    j2p = j2["properties"]
+    assert j2p["rim_elev"] == 103.0
+    assert j2p["treatment_count"] == 2
+    assert j2p["treatment_pollutant"] == "TSS"
+    # J1 is in_ctrl=True; J2 is not.
+    j1 = next(f for f in j_feats if f["id"] == "J1")
+    assert j1["properties"]["in_ctrl"] is True
+    assert j2p["in_ctrl"] is False
+
+    # Conduit C1 — slope computed, in_ctrl=True (referenced by RULE R1),
+    # inlet_usage row binds inlet_name + inlet_pct_clogged.
+    c_feats = by_role["conduit"]["feature_collection"]["features"]
+    c1 = next(f for f in c_feats if f["id"] == "C1")
+    c1p = c1["properties"]
+    assert c1p["slope"] == pytest.approx(0.05)
+    assert c1p["in_ctrl"] is True
+    assert c1p["inlet_name"] == "INLET1"
+    assert c1p["inlet_pct_clogged"] == 5.0
+
+    # Subcatchment S1 — gw_* keys present, infil_model from OPTIONS.
+    s_feats = by_role["subcatchment"]["feature_collection"]["features"]
+    s1p = s_feats[0]["properties"]
+    assert s1p["infil_model"] == "HORTON"
+    assert s1p["gw_aquifer"] == "AQ1"
+    assert s1p["gw_node"] == "J1"
+    assert s1p["gw_surface_elev"] == "100"
+    assert s1p["gw_a1"] == "0.001"

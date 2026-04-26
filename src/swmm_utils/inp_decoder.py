@@ -1011,6 +1011,136 @@ class SwmmInputDecoder:
         """Parse [HYDROGRAPHS] section (not supported - store as-is)."""
         model["hydrographs"] = "\n".join(data)
 
+    def _parse_treatment(self, model: dict, data: List[str]):
+        """Parse [TREATMENT] section.
+
+        One row per (node, pollutant) with a free-form function string.
+        Format: ``Node  Pollutant  Function``. The function may contain
+        spaces and operators — we capture the entire remainder of the
+        line verbatim so engine-side parsing stays correct.
+        """
+        treatment = []
+        for line in data:
+            parts = line.split(None, 2)
+            if len(parts) >= 3:
+                treatment.append({
+                    "node": parts[0],
+                    "pollutant": parts[1],
+                    "function": parts[2],
+                })
+        model["treatment"] = treatment
+
+    def _parse_groundwater(self, model: dict, data: List[str]):
+        """Parse [GROUNDWATER] section.
+
+        SWMM 5.2 row: ``Subcat Aquifer Node Esurf A1 B1 A2 B2 A3 Dsw
+        Egwt Ebot Wgr Umc``. Older versions truncate after ``A3``.
+        Trailing optional columns are emitted only when present so the
+        round-trip preserves the source's column count.
+        """
+        groundwater = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            entry: Dict[str, Any] = {
+                "subcatchment": parts[0],
+                "aquifer": parts[1],
+                "node": parts[2],
+                "surface_elev": parts[3],
+                "a1": parts[4],
+            }
+            optional = (
+                "b1", "a2", "b2", "a3",
+                "dsw", "egwt", "ebot", "wgr", "umc",
+            )
+            for i, key in enumerate(optional, start=5):
+                if len(parts) > i:
+                    entry[key] = parts[i]
+            groundwater.append(entry)
+        model["groundwater"] = groundwater
+
+    def _parse_streets(self, model: dict, data: List[str]):
+        """Parse [STREETS] section (SWMM 5.2).
+
+        Row: ``Name Tcrown Hcurb Sx nRoad Hdep Wdep Sides [Tback Sback nBack]``.
+        Stored as ``dict[name -> params]`` so consumers can look up by
+        street name (matches the convention used for curves / patterns).
+        """
+        streets: Dict[str, Dict[str, Any]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 8:
+                continue
+            entry: Dict[str, Any] = {
+                "tcrown": parts[1],
+                "hcurb": parts[2],
+                "sx": parts[3],
+                "n_road": parts[4],
+                "h_dep": parts[5],
+                "w_dep": parts[6],
+                "sides": parts[7],
+            }
+            if len(parts) > 8:
+                entry["t_back"] = parts[8]
+            if len(parts) > 9:
+                entry["s_back"] = parts[9]
+            if len(parts) > 10:
+                entry["n_back"] = parts[10]
+            streets[parts[0]] = entry
+        model["streets"] = streets
+
+    def _parse_inlets(self, model: dict, data: List[str]):
+        """Parse [INLETS] section (SWMM 5.2).
+
+        Multi-line per inlet — first column is the inlet name, second
+        is the type token (``GRATE`` / ``CURB`` / ``SLOTTED`` /
+        ``CUSTOM`` / ``DROP_GRATE`` / ``DROP_CURB``), remainder is
+        type-dependent params. We collect rows as ``dict[name ->
+        list[{type, params}]]`` so a user-defined inlet that combines
+        e.g. a GRATE + a CURB row stays grouped under one name.
+        """
+        inlets: Dict[str, List[Dict[str, Any]]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[0]
+            kind = parts[1].upper()
+            params = parts[2:]
+            inlets.setdefault(name, []).append({
+                "type": kind,
+                "params": params,
+            })
+        model["inlets"] = inlets
+
+    def _parse_inlet_usage(self, model: dict, data: List[str]):
+        """Parse [INLET_USAGE] section (SWMM 5.2).
+
+        Row: ``Conduit Inlet Node [Pct_Clogged Max_Flow Hgt_Dstore
+        Wdth_Dstore Placement]``. Stored as a list keyed by conduit so
+        consumers can join onto link features.
+        """
+        usage = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            entry: Dict[str, Any] = {
+                "conduit": parts[0],
+                "inlet": parts[1],
+                "node": parts[2],
+            }
+            optional = (
+                "pct_clogged", "max_flow",
+                "h_dstore", "w_dstore", "placement",
+            )
+            for i, key in enumerate(optional, start=3):
+                if len(parts) > i:
+                    entry[key] = parts[i]
+            usage.append(entry)
+        model["inlet_usage"] = usage
+
     def _parse_rdii(self, model: dict, data: List[str]):
         """Parse [RDII] section."""
         rdii = []

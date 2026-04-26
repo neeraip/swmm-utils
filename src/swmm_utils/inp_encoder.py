@@ -95,6 +95,11 @@ class SwmmInputEncoder:
         self._write_lid_controls(model, file)
         self._write_lid_usage(model, file)
         self._write_files(model, file)
+        self._write_treatment(model, file)
+        self._write_groundwater(model, file)
+        self._write_streets(model, file)
+        self._write_inlets(model, file)
+        self._write_inlet_usage(model, file)
         self._write_hydrographs(model, file)
         self._write_rdii(model, file)
         self._write_timeseries(model, file)
@@ -1239,3 +1244,106 @@ class SwmmInputEncoder:
                 file.write(
                     f"{node:<16} {unithydrograph:<16} {sewer_area:<8} {factor}\n"
                 )
+
+    def _write_treatment(self, model: Dict[str, Any], file: TextIO):
+        """Write [TREATMENT] section."""
+        if "treatment" not in model or not model["treatment"]:
+            return
+        self._write_section_header(file, "TREATMENT")
+        file.write(";;Node           Pollutant        Function\n")
+        for entry in model["treatment"]:
+            node = self._get_field(entry, "node")
+            pollutant = self._get_field(entry, "pollutant")
+            function = self._get_field(entry, "function", default="")
+            file.write(f"{node:<16} {pollutant:<16} {function}\n")
+
+    def _write_groundwater(self, model: Dict[str, Any], file: TextIO):
+        """Write [GROUNDWATER] section."""
+        if "groundwater" not in model or not model["groundwater"]:
+            return
+        self._write_section_header(file, "GROUNDWATER")
+        file.write(
+            ";;Subcatchment   Aquifer          Node             Esurf  A1  B1"
+            "  A2  B2  A3  Dsw  Egwt  Ebot  Wgr  Umc\n"
+        )
+        for gw in model["groundwater"]:
+            cols = [
+                self._get_field(gw, "subcatchment"),
+                self._get_field(gw, "aquifer"),
+                self._get_field(gw, "node"),
+                self._get_field(gw, "surface_elev"),
+                self._get_field(gw, "a1"),
+            ]
+            for key in ("b1", "a2", "b2", "a3",
+                        "dsw", "egwt", "ebot", "wgr", "umc"):
+                v = self._get_field(gw, key, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(" ".join(str(c) for c in cols) + "\n")
+
+    def _write_streets(self, model: Dict[str, Any], file: TextIO):
+        """Write [STREETS] section."""
+        if "streets" not in model or not model["streets"]:
+            return
+        self._write_section_header(file, "STREETS")
+        file.write(
+            ";;Name           Tcrown  Hcurb  Sx  nRoad  Hdep  Wdep  Sides"
+            "  Tback  Sback  nBack\n"
+        )
+        for name, st in model["streets"].items():
+            cols = [
+                self._get_field(st, "tcrown"),
+                self._get_field(st, "hcurb"),
+                self._get_field(st, "sx"),
+                self._get_field(st, "n_road"),
+                self._get_field(st, "h_dep", default="0"),
+                self._get_field(st, "w_dep", default="0"),
+                self._get_field(st, "sides", default="2"),
+            ]
+            for opt in ("t_back", "s_back", "n_back"):
+                v = self._get_field(st, opt, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(f"{name:<16} " + " ".join(str(c) for c in cols) + "\n")
+
+    def _write_inlets(self, model: Dict[str, Any], file: TextIO):
+        """Write [INLETS] section.
+
+        Decoder stores ``dict[name -> list[{type, params}]]`` so multi-line
+        inlet definitions (e.g. a CUSTOM with both GRATE + CURB rows) stay
+        grouped. Emit one line per (name, row) preserving original order.
+        """
+        if "inlets" not in model or not model["inlets"]:
+            return
+        self._write_section_header(file, "INLETS")
+        file.write(";;Name           Type        Parameters\n")
+        for name, rows in model["inlets"].items():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                kind = (row.get("type") or "").upper()
+                params = row.get("params") or []
+                params_str = " ".join(str(p) for p in params) if isinstance(params, list) else str(params)
+                file.write(f"{name:<16} {kind:<11} {params_str}\n")
+
+    def _write_inlet_usage(self, model: Dict[str, Any], file: TextIO):
+        """Write [INLET_USAGE] section."""
+        if "inlet_usage" not in model or not model["inlet_usage"]:
+            return
+        self._write_section_header(file, "INLET_USAGE")
+        file.write(
+            ";;Conduit        Inlet            Node             PctClogged"
+            "  MaxFlow  Hgt_Dstore  Wdth_Dstore  Placement\n"
+        )
+        for u in model["inlet_usage"]:
+            cols = [
+                self._get_field(u, "conduit"),
+                self._get_field(u, "inlet"),
+                self._get_field(u, "node"),
+            ]
+            for opt in ("pct_clogged", "max_flow",
+                        "h_dstore", "w_dstore", "placement"):
+                v = self._get_field(u, opt, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(" ".join(str(c) for c in cols) + "\n")

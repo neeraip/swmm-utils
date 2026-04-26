@@ -374,7 +374,8 @@ def emit_geojson_layers(
             bucket["coverage_dominant_pct"] = pct
 
     # [LID_USAGE]: many rows per subcatchment. Roll up into count + first
-    # control name + total area.
+    # control name + total area + comma-joined names (PCSWMM exposes the
+    # name list as ``LIDNAMES``; we mirror the convention).
     lid_usage_by_id: Dict[str, Dict[str, Any]] = {}
     for lu in full.get("lid_usage", []) or []:
         sid = str(lu.get("subcatchment", lu.get("name", "")))
@@ -382,14 +383,130 @@ def emit_geojson_layers(
             continue
         bucket = lid_usage_by_id.setdefault(
             sid,
-            {"lid_count": 0, "lid_first_control": None, "lid_total_area": 0.0},
+            {
+                "lid_count": 0,
+                "lid_first_control": None,
+                "lid_names": [],
+                "lid_total_area": 0.0,
+            },
         )
         bucket["lid_count"] += 1
+        ctrl = lu.get("lid_control") or lu.get("control")
         if bucket["lid_first_control"] is None:
-            bucket["lid_first_control"] = lu.get("lid_control") or lu.get("control")
+            bucket["lid_first_control"] = ctrl
+        if ctrl and ctrl not in bucket["lid_names"]:
+            bucket["lid_names"].append(ctrl)
         a = _sf(lu.get("area"))
         if a is not None:
             bucket["lid_total_area"] += a
+    # Finalize lid_names as a stable comma-joined string.
+    for bucket in lid_usage_by_id.values():
+        bucket["lid_names"] = ",".join(bucket["lid_names"]) or None
+
+    # [RDII]: per-node unit hydrograph assignment. The decoder emits a
+    # list of {node, unithydrograph, sewer_area, factor}; bind by node.
+    rdii_by_id: Dict[str, Dict[str, Any]] = {}
+    for r in full.get("rdii", []) or []:
+        nid = str(r.get("node", r.get("id", "")))
+        if not nid:
+            continue
+        rdii_by_id[nid] = {
+            "rdii_unithydrograph": r.get("unithydrograph"),
+            "rdii_sewer_area": _sf(r.get("sewer_area")),
+            "rdii_factor": _sf(r.get("factor")),
+        }
+
+    # [TREATMENT]: many rows per node (one per pollutant). Collapse to
+    # the FIRST pollutant's function string + a count so the row stays
+    # single-valued. Consumers can look up the full set via the node id
+    # if they need it.
+    treatment_by_id: Dict[str, Dict[str, Any]] = {}
+    for t in full.get("treatment", []) or []:
+        nid = str(t.get("node", ""))
+        if not nid:
+            continue
+        bucket = treatment_by_id.setdefault(
+            nid,
+            {
+                "treatment_count": 0,
+                "treatment_pollutant": None,
+                "treatment_function": None,
+            },
+        )
+        bucket["treatment_count"] += 1
+        if bucket["treatment_pollutant"] is None:
+            bucket["treatment_pollutant"] = t.get("pollutant")
+            bucket["treatment_function"] = t.get("function")
+
+    # [GROUNDWATER]: one row per subcatchment. Surface every parameter
+    # under a stable ``gw_`` prefix so the attribute table can group.
+    groundwater_by_id: Dict[str, Dict[str, Any]] = {}
+    for gw in full.get("groundwater", []) or []:
+        sid = str(gw.get("subcatchment", gw.get("name", "")))
+        if not sid:
+            continue
+        groundwater_by_id[sid] = {
+            f"gw_{k}": v
+            for k, v in gw.items()
+            if k not in ("subcatchment", "name")
+        }
+
+    # [INLET_USAGE]: one row per conduit assignment. Bind onto the
+    # conduit feature with stable ``inlet_*`` prefixes; record the
+    # street name from the conduit's [CONDUITS] row when present so
+    # styling can branch on street-flow links.
+    inlet_usage_by_link: Dict[str, Dict[str, Any]] = {}
+    for u in full.get("inlet_usage", []) or []:
+        lid = str(u.get("conduit", ""))
+        if not lid:
+            continue
+        inlet_usage_by_link[lid] = {
+            "inlet_name": u.get("inlet"),
+            "inlet_node": u.get("node"),
+            "inlet_pct_clogged": _sf(u.get("pct_clogged")),
+            "inlet_max_flow": _sf(u.get("max_flow")),
+            "inlet_h_dstore": _sf(u.get("h_dstore")),
+            "inlet_w_dstore": _sf(u.get("w_dstore")),
+            "inlet_placement": u.get("placement"),
+        }
+
+    # [CONTROLS] presence flag. The decoder stores controls as a single
+    # string blob; we scan it for each link/node id and set ``in_ctrl``
+    # / ``in_ctrl_node`` to True when the id appears as a whole token.
+    # Cheaper than parsing the rule-language properly and good enough
+    # for "show me elements involved in control rules" symbology.
+    controls_text = ""
+    if isinstance(full.get("controls"), str):
+        controls_text = full["controls"]
+
+    def _in_controls(eid: str) -> bool:
+        if not eid or not controls_text:
+            return False
+        # Word-boundary match so "P1" doesn't match "P10".
+        token = eid
+        idx = 0
+        while True:
+            idx = controls_text.find(token, idx)
+            if idx < 0:
+                return False
+            before = controls_text[idx - 1] if idx > 0 else " "
+            after_pos = idx + len(token)
+            after = controls_text[after_pos] if after_pos < len(controls_text) else " "
+            if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+                return True
+            idx = after_pos
+
+    # OPTIONS.INFILTRATION choice — when present, surface on each
+    # subcatchment as ``infil_model`` so the UI can label the generic
+    # param1..5 columns (e.g. HORTON's max-rate / min-rate / decay vs
+    # CURVE_NUMBER's curve number / conductivity / dry time).
+    options_dict = full.get("options", {}) or {}
+    infiltration_model = None
+    if isinstance(options_dict, dict):
+        for k, v in options_dict.items():
+            if k.lower() == "infiltration":
+                infiltration_model = str(v).upper() if v else None
+                break
 
     def _enrich_node(row: Dict[str, Any], nid: str) -> Dict[str, Any]:
         if nid in tag_by_id:
@@ -398,6 +515,20 @@ def emit_geojson_layers(
             row.update(inflow_by_id[nid])
         if nid in dwf_by_id:
             row.update(dwf_by_id[nid])
+        if nid in rdii_by_id:
+            row.update(rdii_by_id[nid])
+        if nid in treatment_by_id:
+            row.update(treatment_by_id[nid])
+        # Computed: rim_elev = invert + max_depth. Junctions / storage /
+        # dividers have invert under "elevation" and max-depth under
+        # "max_depth". Outfalls have only an invert (no rim) so this is
+        # a no-op for them.
+        elev = _sf(row.get("elevation"))
+        depth = _sf(row.get("max_depth"))
+        if elev is not None and depth is not None:
+            row["rim_elev"] = elev + depth
+        # Boolean: any [CONTROLS] rule references this node.
+        row["in_ctrl"] = _in_controls(nid)
         return row
 
     def _enrich_link(row: Dict[str, Any], lid: str) -> Dict[str, Any]:
@@ -407,6 +538,22 @@ def emit_geojson_layers(
             row.update(xsection_by_link[lid])
         if lid in losses_by_link:
             row.update(losses_by_link[lid])
+        if lid in inlet_usage_by_link:
+            row.update(inlet_usage_by_link[lid])
+        # Computed: slope = (from_invert - to_invert) / length where
+        # invert = node.elevation + offset. Falls through silently if
+        # any input is unresolvable so we don't manufacture a 0 slope.
+        if all(k in row for k in ("from_node", "to_node", "length")):
+            length = _sf(row.get("length"))
+            if length and length > 0:
+                from_inv = _sf(node_invert_by_id.get(row["from_node"]))
+                to_inv = _sf(node_invert_by_id.get(row["to_node"]))
+                in_off = _sf(row.get("in_offset")) or 0.0
+                out_off = _sf(row.get("out_offset")) or 0.0
+                if from_inv is not None and to_inv is not None:
+                    row["slope"] = ((from_inv + in_off) - (to_inv + out_off)) / length
+        # Boolean: any [CONTROLS] rule references this link.
+        row["in_ctrl"] = _in_controls(lid)
         return row
 
     def _enrich_subcatchment(row: Dict[str, Any], sid: str) -> Dict[str, Any]:
@@ -420,7 +567,22 @@ def emit_geojson_layers(
             row.update(coverages_by_id[sid])
         if sid in lid_usage_by_id:
             row.update(lid_usage_by_id[sid])
+        if sid in groundwater_by_id:
+            row.update(groundwater_by_id[sid])
+        if infiltration_model:
+            row["infil_model"] = infiltration_model
         return row
+
+    # Node-invert lookup for conduit slope computation. Built once
+    # (post-coord_map) so all link enrichments reuse it. Includes every
+    # node type — junctions, outfalls, storage, dividers — using the
+    # `elevation` column on each section row.
+    node_invert_by_id: Dict[str, Any] = {}
+    for section_key in ("junctions", "outfalls", "storage", "dividers"):
+        for r in full.get(section_key, []) or []:
+            nid = r.get("name")
+            if nid:
+                node_invert_by_id[str(nid)] = r.get("elevation")
 
     layers: List[Dict[str, Any]] = []
 
