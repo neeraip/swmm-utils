@@ -1121,8 +1121,71 @@ class SwmmInputDecoder:
         model["files"] = files
 
     def _parse_hydrographs(self, model: dict, data: List[str]):
-        """Parse [HYDROGRAPHS] section (not supported - store as-is)."""
-        model["hydrographs"] = "\n".join(data)
+        """Parse [HYDROGRAPHS] section (RDII unit hydrographs).
+
+        Two row shapes share the section under one Name:
+          - Header row:    ``Name Raingage`` (2 tokens) — names the rain
+            gage feeding this hydrograph group.
+          - Response row:  ``Name Month Response R T K [Dmax Drecov Dinit]``
+            (6+ tokens) where Month is ``ALL`` or ``JAN``..``DEC`` and
+            Response is ``SHORT``/``MEDIUM``/``LONG``.
+
+        Emitted structure (round-trips via the encoder):
+
+            {
+              "HG1": {
+                "raingage": "RG1",
+                "responses": [
+                  {"month": "ALL", "response": "SHORT",
+                   "r": "0.033", "t": "1.5", "k": "2.0"},
+                  ...
+                ],
+              }
+            }
+
+        Numeric fields are kept as strings so values authored with
+        engine-specific precision round-trip without floating-point
+        reformatting.
+        """
+        hydrographs: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            name = parts[0]
+            entry = hydrographs.setdefault(
+                name, {"raingage": "", "responses": []}
+            )
+            if len(parts) == 2:
+                # Header row — names the rain gage.
+                entry["raingage"] = parts[1]
+            elif len(parts) >= 5:
+                # Response row. SWMM's reference format places Month then
+                # Response (SHORT/MEDIUM/LONG) before the R/T/K triple;
+                # accept the legacy ordering (Response then Month) as a
+                # fallback so .inp files saved by older tools round-trip.
+                tok1 = parts[1]
+                tok2 = parts[2]
+                month_set = {
+                    "ALL", "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+                }
+                response_set = {"SHORT", "MEDIUM", "LONG"}
+                if tok1.upper() in month_set:
+                    month, response = tok1, tok2
+                elif tok2.upper() in month_set:
+                    response, month = tok1, tok2
+                else:
+                    month, response = tok1, tok2
+                resp: Dict[str, Any] = {
+                    "month": month,
+                    "response": response,
+                }
+                tail_keys = ("r", "t", "k", "dmax", "drecov", "dinit")
+                for key, value in zip(tail_keys, parts[3:]):
+                    resp[key] = value
+                entry["responses"].append(resp)
+        model["hydrographs"] = hydrographs
 
     def _parse_treatment(self, model: dict, data: List[str]):
         """Parse [TREATMENT] section.
@@ -1230,9 +1293,16 @@ class SwmmInputDecoder:
     def _parse_inlet_usage(self, model: dict, data: List[str]):
         """Parse [INLET_USAGE] section (SWMM 5.2).
 
-        Row: ``Conduit Inlet Node [Pct_Clogged Max_Flow Hgt_Dstore
-        Wdth_Dstore Placement]``. Stored as a list keyed by conduit so
-        consumers can join onto link features.
+        SWMM 5.2 row layout (column order matters — the previous
+        version of this handler skipped the ``Number`` column and
+        shifted every following field by one slot):
+
+          Conduit  Inlet  Node  Number  Pct_Clogged  Max_Flow
+                 hgt_Dstore  wdth_Dstore  Placement
+
+        Stored as a list keyed by conduit so consumers can join onto
+        link features. Optional trailing columns are emitted only
+        when present.
         """
         usage = []
         for line in data:
@@ -1245,7 +1315,7 @@ class SwmmInputDecoder:
                 "node": parts[2],
             }
             optional = (
-                "pct_clogged", "max_flow",
+                "number", "pct_clogged", "max_flow",
                 "h_dstore", "w_dstore", "placement",
             )
             for i, key in enumerate(optional, start=3):
@@ -1255,16 +1325,26 @@ class SwmmInputDecoder:
         model["inlet_usage"] = usage
 
     def _parse_rdii(self, model: dict, data: List[str]):
-        """Parse [RDII] section."""
+        """Parse [RDII] section.
+
+        SWMM 5.2 row: ``Node UnitHydrograph Sewer_Area [Factor]``.
+        ``Factor`` is optional and defaults to 1.0 per the engine — we
+        require only 3 columns and surface ``factor`` only when the
+        author wrote it. Real-world models routinely omit it (e.g.
+        Raytown), and the previous ``>= 4`` gate silently dropped
+        every row.
+        """
         rdii = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 4:
-                entry: Dict[str, Any] = {
-                    "node": parts[0],
-                    "unithydrograph": parts[1],
-                    "sewer_area": parts[2],
-                    "factor": parts[3],
-                }
-                rdii.append(entry)
+            if len(parts) < 3:
+                continue
+            entry: Dict[str, Any] = {
+                "node": parts[0],
+                "unithydrograph": parts[1],
+                "sewer_area": parts[2],
+            }
+            if len(parts) > 3:
+                entry["factor"] = parts[3]
+            rdii.append(entry)
         model["rdii"] = rdii

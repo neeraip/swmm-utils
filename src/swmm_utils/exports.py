@@ -335,7 +335,20 @@ def emit_geojson_layers(
                 "inflow_baseline_pattern": inf.get("baseline_pattern"),
             }
 
-    # Per-node dry-weather flow. Same one-row-per-node summary as inflows.
+    # Per-node dry-weather flow. The decoder writes:
+    #   {node, constituent, baseline, patterns: ["WEEKDAY", "WEEKEND", "", ""]}
+    # We expose the engine's authoring shape on the feature with a
+    # ``dwf_baseline`` value (the .inp column is literally named
+    # "Baseline") and the four pattern slots split out so the panel
+    # can render them as individual reference chips.
+    def _strip_quotes(s: Any) -> Optional[str]:
+        if s is None:
+            return None
+        out = str(s)
+        if len(out) >= 2 and out[0] == '"' and out[-1] == '"':
+            out = out[1:-1]
+        return out or None
+
     dwf_by_id: Dict[str, Dict[str, Any]] = {}
     for d in full.get("dwf", []) or []:
         nid = str(d.get("node", d.get("id", "")))
@@ -343,14 +356,20 @@ def emit_geojson_layers(
             continue
         constituent = str(d.get("constituent", "")).upper()
         if constituent == "FLOW" or nid not in dwf_by_id:
-            dwf_by_id[nid] = {
+            patterns = d.get("patterns") or []
+            if not isinstance(patterns, list):
+                patterns = [patterns]
+            entry: Dict[str, Any] = {
                 "dwf_constituent": d.get("constituent"),
-                "dwf_value": _sf(d.get("value", d.get("average"))),
-                "dwf_pattern1": d.get("pattern1"),
-                "dwf_pattern2": d.get("pattern2"),
-                "dwf_pattern3": d.get("pattern3"),
-                "dwf_pattern4": d.get("pattern4"),
+                "dwf_baseline": _sf(
+                    d.get("baseline", d.get("value", d.get("average")))
+                ),
             }
+            for i in range(4):
+                entry[f"dwf_pattern{i + 1}"] = _strip_quotes(
+                    patterns[i] if i < len(patterns) else None
+                )
+            dwf_by_id[nid] = entry
 
     # [COVERAGES]: one row per (subcatchment, landuse). Summarize as the
     # dominant landuse + a count so the row stays single-valued.
@@ -464,6 +483,7 @@ def emit_geojson_layers(
         inlet_usage_by_link[lid] = {
             "inlet_name": u.get("inlet"),
             "inlet_node": u.get("node"),
+            "inlet_count": _sf(u.get("number")) or 1,
             "inlet_pct_clogged": _sf(u.get("pct_clogged")),
             "inlet_max_flow": _sf(u.get("max_flow")),
             "inlet_h_dstore": _sf(u.get("h_dstore")),

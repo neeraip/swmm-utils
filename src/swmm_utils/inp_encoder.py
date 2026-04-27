@@ -1280,15 +1280,52 @@ class SwmmInputEncoder:
                 file.write(f"{key:<20} {value}\n")
 
     def _write_hydrographs(self, model: Dict[str, Any], file: TextIO):
-        """Write [HYDROGRAPHS] section."""
-        if "hydrographs" in model and model["hydrographs"]:
-            self._write_section_header(file, "HYDROGRAPHS")
-            hydrographs_data = model["hydrographs"]
-            if isinstance(hydrographs_data, str):
-                file.write(hydrographs_data)
-            else:
-                for entry in hydrographs_data:
-                    file.write(f"{entry}\n")
+        """Write [HYDROGRAPHS] section.
+
+        Accepts three shapes for backward compatibility:
+          - ``str`` — verbatim block (legacy callers).
+          - ``list`` — pre-formatted lines (legacy callers).
+          - ``dict`` — structured form emitted by the current decoder
+            (``{name: {raingage, responses: [...]}}``).
+        """
+        if "hydrographs" not in model or not model["hydrographs"]:
+            return
+        self._write_section_header(file, "HYDROGRAPHS")
+        hydrographs_data = model["hydrographs"]
+        if isinstance(hydrographs_data, str):
+            file.write(hydrographs_data)
+            if not hydrographs_data.endswith("\n"):
+                file.write("\n")
+            return
+        if isinstance(hydrographs_data, list):
+            for entry in hydrographs_data:
+                file.write(f"{entry}\n")
+            return
+        # Structured dict form. Header row first (Name + Raingage),
+        # then one row per response.
+        file.write(
+            ";;Hydrograph    Rain Gage/Month     Response  "
+            "R       T       K       Dmax    Drecov   Dinit\n"
+        )
+        for name, entry in hydrographs_data.items():
+            raingage = entry.get("raingage", "") if isinstance(entry, dict) else ""
+            if raingage:
+                file.write(f"{name:<16}{raingage}\n")
+            responses = entry.get("responses", []) if isinstance(entry, dict) else []
+            for resp in responses:
+                if not isinstance(resp, dict):
+                    continue
+                row = [
+                    f"{name:<16}",
+                    f"{resp.get('month', 'ALL'):<20}",
+                    f"{resp.get('response', 'SHORT'):<10}",
+                ]
+                for key in ("r", "t", "k", "dmax", "drecov", "dinit"):
+                    val = resp.get(key)
+                    if val in (None, ""):
+                        continue
+                    row.append(f"{val:<8}")
+                file.write("".join(row).rstrip() + "\n")
 
     def _write_rdii(self, model: Dict[str, Any], file: TextIO):
         """Write [RDII] section."""
@@ -1388,13 +1425,18 @@ class SwmmInputEncoder:
                 file.write(f"{name:<16} {kind:<11} {params_str}\n")
 
     def _write_inlet_usage(self, model: Dict[str, Any], file: TextIO):
-        """Write [INLET_USAGE] section."""
+        """Write [INLET_USAGE] section.
+
+        Column order matches SWMM 5.2:
+          Conduit Inlet Node Number PctClogged MaxFlow Hgt_Dstore
+                 Wdth_Dstore Placement
+        """
         if "inlet_usage" not in model or not model["inlet_usage"]:
             return
         self._write_section_header(file, "INLET_USAGE")
         file.write(
-            ";;Conduit        Inlet            Node             PctClogged"
-            "  MaxFlow  Hgt_Dstore  Wdth_Dstore  Placement\n"
+            ";;Conduit        Inlet            Node             Number"
+            "  PctClogged  MaxFlow  Hgt_Dstore  Wdth_Dstore  Placement\n"
         )
         for u in model["inlet_usage"]:
             cols = [
@@ -1402,7 +1444,7 @@ class SwmmInputEncoder:
                 self._get_field(u, "inlet"),
                 self._get_field(u, "node"),
             ]
-            for opt in ("pct_clogged", "max_flow",
+            for opt in ("number", "pct_clogged", "max_flow",
                         "h_dstore", "w_dstore", "placement"):
                 v = self._get_field(u, opt, default="")
                 if v != "":
