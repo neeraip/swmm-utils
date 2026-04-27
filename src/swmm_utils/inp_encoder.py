@@ -939,32 +939,45 @@ class SwmmInputEncoder:
                         file.write(f"{name:<16} {' '.join(chunk)}\n")
 
     def _write_curves(self, model: Dict[str, Any], file: TextIO):
-        """Write [CURVES] section."""
+        """Write [CURVES] section.
+
+        SWMM 5.2 expects the curve TYPE keyword only on the FIRST row of
+        each curve; continuation rows are ``Name X-Value Y-Value`` with
+        the type column padded out as whitespace. Writing the type on
+        every row triggers ``ERROR 211: invalid number <Type>`` because
+        the engine then reads the type token where it expects an
+        x-value.
+        """
         if "curves" in model and model["curves"]:
             self._write_section_header(file, "CURVES")
             file.write(";;Name           Type       X-Value    Y-Value   \n")
 
-            # Handle both dict format (name -> {type, points}) and array format ([{name, type, points}])
+            def _emit_curve(name: str, curve_type: str, points):
+                # First row carries the type; continuation rows pad the
+                # type column with spaces so columns line up visually
+                # with the SWMM-authored format.
+                blank_type = " " * 10
+                for i, point in enumerate(points):
+                    x = self._get_field(point, "x", default="0")
+                    y = self._get_field(point, "y", default="0")
+                    type_col = f"{curve_type:<10}" if i == 0 else blank_type
+                    file.write(f"{name:<16} {type_col} {x:<10} {y}\n")
+
             curves_data = model["curves"]
             if isinstance(curves_data, dict):
-                # Dict format: iterate over items
                 for name, curve in curves_data.items():
-                    curve_type = curve.get("type", "STORAGE")
-                    points = curve.get("points", [])
-                    for point in points:
-                        x = self._get_field(point, "x", default="0")
-                        y = self._get_field(point, "y", default="0")
-                        file.write(f"{name:<16} {curve_type:<10} {x:<10} {y}\n")
+                    _emit_curve(
+                        name,
+                        curve.get("type", "STORAGE"),
+                        curve.get("points", []),
+                    )
             elif isinstance(curves_data, list):
-                # Array format: iterate over list
                 for curve in curves_data:
-                    name = self._get_field(curve, "name")
-                    curve_type = self._get_field(curve, "type", default="STORAGE")
-                    points = curve.get("points", [])
-                    for point in points:
-                        x = self._get_field(point, "x", default="0")
-                        y = self._get_field(point, "y", default="0")
-                        file.write(f"{name:<16} {curve_type:<10} {x:<10} {y}\n")
+                    _emit_curve(
+                        self._get_field(curve, "name"),
+                        self._get_field(curve, "type", default="STORAGE"),
+                        curve.get("points", []),
+                    )
 
     def _write_coordinates(self, model: Dict[str, Any], file: TextIO):
         """Write [COORDINATES] section."""

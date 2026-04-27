@@ -432,20 +432,50 @@ class SwmmInputDecoder:
         model["snowpacks"] = snowpacks
 
     def _parse_raingages(self, model: dict, data: List[str]):
-        """Parse [RAINGAGES] section."""
+        """Parse [RAINGAGES] section.
+
+        SWMM 5.2 column layout is source-dependent. The trailing
+        portion of the row encodes:
+
+          ... TIMESERIES <series_name>
+          ... FILE       <"filename"> <station_id> <units>
+
+        For FILE source we additionally surface ``station`` and
+        ``units`` as their own columns (and strip surrounding quotes
+        from the filename) so the bottom data table and side panel
+        can render rain units instead of one squashed string. The
+        legacy ``file_or_station`` field is kept as the joined
+        trailing string so existing encoders / tests round-trip
+        unchanged.
+        """
         raingages = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 6:
-                gage = {
-                    "name": parts[0],
-                    "format": parts[1],
-                    "interval": parts[2],
-                    "scf": parts[3],
-                    "source": parts[4],
-                    "file_or_station": " ".join(parts[5:]),
-                }
-                raingages.append(gage)
+            if len(parts) < 6:
+                continue
+            gage = {
+                "name": parts[0],
+                "format": parts[1],
+                "interval": parts[2],
+                "scf": parts[3],
+                "source": parts[4],
+                "file_or_station": " ".join(parts[5:]),
+            }
+            source_upper = parts[4].upper()
+            if source_upper == "FILE" and len(parts) >= 8:
+                # Strip surrounding double-quotes from the filename
+                # token; SWMM allows quoted paths when they contain
+                # spaces, but at this point the tokenizer already
+                # split on whitespace so a path with spaces would
+                # already be broken — we only handle the simple
+                # quoted case.
+                file_name = parts[5].strip('"')
+                gage["data_param"] = file_name
+                gage["station"] = parts[6]
+                gage["units"] = parts[7]
+            elif source_upper == "TIMESERIES":
+                gage["data_param"] = parts[5]
+            raingages.append(gage)
         model["raingages"] = raingages
 
     def _parse_subcatchments(self, model: dict, data: List[str]):
@@ -529,19 +559,40 @@ class SwmmInputDecoder:
         model["junctions"] = junctions
 
     def _parse_outfalls(self, model: dict, data: List[str]):
-        """Parse [OUTFALLS] section."""
+        """Parse [OUTFALLS] section.
+
+        SWMM 5.2 column layout is type-dependent. The ``Stage Data``
+        column only exists for FIXED / TIDAL / TIMESERIES boundary
+        types — for FREE and NORMAL it is omitted entirely, so
+        whitespace-tokenizing the row would otherwise mis-shift
+        ``gated`` and ``route_to`` one column to the left.
+
+        Layouts:
+          FREE | NORMAL              : name elev type           gated route_to
+          FIXED | TIDAL | TIMESERIES : name elev type stage_data gated route_to
+        """
         outfalls = []
+        types_with_stage = {"FIXED", "TIDAL", "TIMESERIES"}
         for line in data:
             parts = line.split()
-            if len(parts) >= 3:
-                outfall = {"name": parts[0], "elevation": parts[1], "type": parts[2]}
+            if len(parts) < 3:
+                continue
+            outfall_type = parts[2].upper()
+            outfall = {"name": parts[0], "elevation": parts[1], "type": parts[2]}
+            if outfall_type in types_with_stage:
                 if len(parts) > 3:
                     outfall["stage_data"] = parts[3]
                 if len(parts) > 4:
                     outfall["gated"] = parts[4]
                 if len(parts) > 5:
                     outfall["route_to"] = parts[5]
-                outfalls.append(outfall)
+            else:
+                # FREE / NORMAL / unknown — no stage_data column.
+                if len(parts) > 3:
+                    outfall["gated"] = parts[3]
+                if len(parts) > 4:
+                    outfall["route_to"] = parts[4]
+            outfalls.append(outfall)
         model["outfalls"] = outfalls
 
     def _parse_storage(self, model: dict, data: List[str]):
@@ -796,21 +847,58 @@ class SwmmInputDecoder:
         model["patterns"] = patterns
 
     def _parse_curves(self, model: dict, data: List[str]):
-        """Parse [CURVES] section."""
-        curves = {}
+        """Parse [CURVES] section.
+
+        SWMM 5.2 row layouts:
+          First row of a curve  : ``Name Type X Y [X Y ...]``
+          Continuation rows     : ``Name X Y [X Y ...]``
+
+        The type keyword only appears on the first row of each curve.
+        We detect "is this the first row?" by looking up parts[1]
+        against the set of known curve-type keywords (case-insensitive).
+        Anything else is treated as a continuation row.
+        """
+        curves: Dict[str, Any] = {}
+        # Curve types defined by SWMM 5.2 spec. Anything else in
+        # parts[1] means we're on a continuation row, so parts[1] is
+        # an x-value not a type.
+        type_keywords = {
+            "STORAGE", "TIDAL", "RATING", "SHAPE", "CONTROL",
+            "DIVERSION", "WEIR",
+            "PUMP1", "PUMP2", "PUMP3", "PUMP4", "PUMP5",
+        }
 
         for line in data:
             parts = line.split()
-            if len(parts) >= 3:
-                name = parts[0]
+            if len(parts) < 3:
+                continue
+            name = parts[0]
+            data_start = 1
+            if parts[1].upper() in type_keywords:
+                # First row of this curve — capture the type and
+                # start point pairs at parts[2].
                 if name not in curves:
                     curves[name] = {"type": parts[1], "points": []}
-                # Pairs of x, y values
-                for i in range(1, len(parts), 2):
-                    if i + 1 < len(parts):
-                        curves[name]["points"].append(
-                            {"x": parts[i], "y": parts[i + 1]}
-                        )
+                else:
+                    # Curve already started but a duplicate first-row
+                    # is suspicious; tolerate by overwriting type.
+                    curves[name]["type"] = parts[1]
+                data_start = 2
+            else:
+                # Continuation row — type was set on a prior line.
+                if name not in curves:
+                    # No prior first-row seen → unknown type, leave
+                    # blank so the encoder falls through to its
+                    # default. Better than mis-reading parts[1] as a
+                    # type keyword.
+                    curves[name] = {"type": "", "points": []}
+                data_start = 1
+
+            for i in range(data_start, len(parts), 2):
+                if i + 1 < len(parts):
+                    curves[name]["points"].append(
+                        {"x": parts[i], "y": parts[i + 1]}
+                    )
 
         model["curves"] = curves
 
