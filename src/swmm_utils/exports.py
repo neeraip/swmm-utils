@@ -919,11 +919,11 @@ def _per_feature_summary(out_path: PathLike) -> Dict[str, Any]:
         sub_df = _safe_to_dataframe(ep, "subcatchments")
 
     if nodes_df is not None:
-        summary["nodes"] = _summarize_per_feature(nodes_df)
+        summary["nodes"] = _summarize_per_feature(nodes_df, _NODE_METRICS)
     if links_df is not None:
-        summary["links"] = _summarize_per_feature(links_df)
+        summary["links"] = _summarize_per_feature(links_df, _LINK_METRICS)
     if sub_df is not None:
-        summary["subcatchments"] = _summarize_per_feature(sub_df)
+        summary["subcatchments"] = _summarize_per_feature(sub_df, _SUB_METRICS)
 
     return summary
 
@@ -939,36 +939,55 @@ def _safe_to_dataframe(ep: SwmmOutput, role: str):
     return df
 
 
-def _summarize_per_feature(df) -> Dict[str, Any]:
+def _summarize_per_feature(df, metrics: Iterable[str]) -> Dict[str, Any]:
     """
     Min/max/mean per metric per feature for a SwmmOutput dataframe.
 
     SWMM's `to_dataframe(element_type=...)` returns a MultiIndex DataFrame
-    keyed on (timestamp, element_name). We group by element_name (the second
-    level) and reduce across the time axis.
-    """
-    out: Dict[str, Any] = {}
+    keyed on (timestamp, element_name). Columns are the positional
+    ``value_0`` … ``value_<M-1>`` (raw SWMM output indices); we map them
+    to the canonical metric names so the summary is self-describing.
 
-    # MultiIndex DataFrame: index level 1 is element_name.
+    Vectorized via ``groupby.agg`` so 100k+ rows reduce in a single
+    pass instead of a Python-level inner loop.
+    """
+    import numpy as np
+
+    out: Dict[str, Any] = {}
+    if df is None or getattr(df, "empty", True):
+        return out
+
+    metrics = list(metrics)
+
     try:
         idx_names = df.index.names
         element_level = idx_names.index("element_name") if "element_name" in idx_names else 1
-        grouped = df.groupby(level=element_level)
+        grouped = df.groupby(level=element_level, sort=False)
+        # Vectorized aggregation: one pass over the data, returns a
+        # DataFrame keyed by element_name with multi-level columns
+        # (metric_col, stat).
+        agg = grouped.agg(["min", "max", "mean"])
     except Exception:
         return out
 
-    for fid, sub in grouped:
+    raw_cols = list(df.columns)
+    n_metrics_in_df = len(raw_cols)
+
+    # Iterate over the small element axis (hundreds typically) and pull
+    # the precomputed stats out of `agg`.
+    for fid in agg.index:
         per_metric: Dict[str, Any] = {}
-        for col in sub.columns:
-            series = sub[col]
+        for j, raw_col in enumerate(raw_cols):
+            metric_name = metrics[j] if j < len(metrics) else raw_col
             try:
-                per_metric[col] = {
-                    "min": float(series.min()),
-                    "max": float(series.max()),
-                    "mean": float(series.mean()),
-                }
-            except (TypeError, ValueError):
+                vmin = float(agg.loc[fid, (raw_col, "min")])
+                vmax = float(agg.loc[fid, (raw_col, "max")])
+                vmean = float(agg.loc[fid, (raw_col, "mean")])
+            except (TypeError, ValueError, KeyError):
                 continue
+            if any(np.isnan([vmin, vmax, vmean])):
+                continue
+            per_metric[metric_name] = {"min": vmin, "max": vmax, "mean": vmean}
         out[str(fid)] = per_metric
     return out
 
@@ -1377,8 +1396,18 @@ def _build_coords_lookup(coords_data: List[Dict[str, Any]]) -> Dict[str, tuple]:
 def _df_to_cube(df, ordered_ids: list, n_periods: int, metrics: Iterable[str]):
     """
     Reshape SWMM's MultiIndex DataFrame to (n_features, n_periods, n_metrics).
-    DataFrame index: (timestamp, element_name). Columns are metric names.
-    Missing metrics fill with NaN; missing periods or features stay NaN.
+
+    DataFrame index: (timestamp, element_name). Columns are positional
+    ``value_0`` … ``value_<M-1>`` from SWMM's binary output, in the
+    canonical metric order matching ``_NODE_METRICS`` / ``_LINK_METRICS``
+    / ``_SUB_METRICS``. SWMM's ``to_dataframe`` emits rows grouped by
+    element with timestamps incrementing within each group, so a per-
+    element ``.values`` slab is already in period order — we groupby
+    once and copy each slab into the destination cube.
+
+    Missing element_names in the DataFrame stay NaN. Missing tail
+    periods (e.g. early-terminated run) stay NaN. Extra metric columns
+    beyond ``len(metrics)`` are ignored; missing ones stay NaN.
     """
     import numpy as np
 
@@ -1391,44 +1420,23 @@ def _df_to_cube(df, ordered_ids: list, n_periods: int, metrics: Iterable[str]):
         return cube
 
     id_to_idx = {fid: i for i, fid in enumerate(ordered_ids)}
-    metric_to_idx = {name: j for j, name in enumerate(metrics)}
 
-    # Identify which level holds element_name and which holds time.
     idx_names = df.index.names
     name_lvl = idx_names.index("element_name") if "element_name" in idx_names else 1
-    time_lvl = 1 - name_lvl
+    m_in_df = df.shape[1]
+    cols_to_copy = min(m_in_df, m)
 
-    # Flatten to row-iteration; vectorized on small data is overkill.
-    for (k0, k1), row in df.iterrows():
-        fid = k1 if name_lvl == 1 else k0
-        ts = k0 if name_lvl == 1 else k1
+    # ``sort=False`` keeps SWMM's natural emission order — each group
+    # is already (period_0, period_1, …, period_{n_periods-1}) for one
+    # element, so .values is shape (n_periods_present, m_in_df) ready
+    # to drop into the cube at row id_to_idx[fid].
+    for fid, group in df.groupby(level=name_lvl, sort=False):
         i = id_to_idx.get(fid)
         if i is None:
             continue
-        # Map timestamp → period index. We rely on the timestamps being in
-        # order — SWMM .out always emits them sequentially.
-        # The time level is a DatetimeIndex; positions are 0..n_periods-1.
-        # Use level position to derive period:
-        try:
-            p = int(df.index.get_level_values(time_lvl).get_loc(ts))
-        except (KeyError, TypeError):
-            continue
-        if isinstance(p, slice) or not isinstance(p, int):
-            # Multiple matches — pick the first.
-            try:
-                p = int(getattr(p, "start", 0))
-            except Exception:
-                continue
-        if p < 0 or p >= n_periods:
-            continue
-        for col, val in row.items():
-            j = metric_to_idx.get(col)
-            if j is None:
-                continue
-            try:
-                cube[i, p, j] = float(val)
-            except (TypeError, ValueError):
-                continue
+        vals = group.values
+        rows = min(vals.shape[0], n_periods)
+        cube[i, :rows, :cols_to_copy] = vals[:rows, :cols_to_copy]
     return cube
 
 
