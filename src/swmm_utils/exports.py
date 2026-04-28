@@ -843,6 +843,37 @@ def encode_with_overlay(
 # .rpt → report.json
 # ---------------------------------------------------------------------------
 
+def _swmm_flatten_continuity(continuity: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Flatten SWMM's nested continuity dict to a one-level
+    ``label -> display string`` map.
+
+    SWMM's .rpt continuity sections (flow_routing, runoff,
+    groundwater, quality_routing) emit each leaf as a 2-element list
+    ``[volume_in_units, percent_of_inflow]``. The Console Results
+    panel renders ``balances`` via simple key/value rows that skip
+    nested objects, so we serialize each pair as ``"<vol> (<pct>%)"``
+    string here.
+    """
+    out: Dict[str, str] = {}
+    for section, sub in (continuity or {}).items():
+        if not isinstance(sub, dict):
+            continue
+        for key, value in sub.items():
+            label = f"{section}.{key}"
+            if isinstance(value, (list, tuple)):
+                if len(value) >= 2:
+                    out[label] = f"{value[0]:g} ({value[1]:g}%)"
+                elif len(value) == 1:
+                    out[label] = f"{value[0]:g}"
+                else:
+                    out[label] = ""
+            elif value is None:
+                continue
+            else:
+                out[label] = str(value)
+    return out
+
+
 def emit_report_json(
     rpt_path: PathLike,
     out_path: Optional[PathLike] = None,
@@ -883,6 +914,20 @@ def emit_report_json(
             "quality_routing_continuity": report.quality_routing_continuity,
             "subcatchment_washoff": report.subcatchment_washoff,
             "link_pollutant_load": report.link_pollutant_load,
+            # Top-level normalized fields the Console Results panel
+            # consumes directly. Engine-shape sections above stay as
+            # the source of truth; these are display-ready summaries.
+            "warnings": list(report.warnings),
+            "errors": list(report.errors),
+            "timestamps": {
+                "start_date": report.analysis_options.get("starting_date"),
+                "end_date": report.analysis_options.get("ending_date"),
+                "flow_units": report.analysis_options.get("flow_units"),
+                "flow_routing_method": report.analysis_options.get(
+                    "flow_routing_method"
+                ),
+            },
+            "balances": _swmm_flatten_continuity(report.continuity),
         }
 
     if out_path is not None:
