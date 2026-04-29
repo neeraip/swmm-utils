@@ -270,7 +270,7 @@ class SwmmInputDecoder:
             return
 
         keys_before = set(model.keys())
-        handler(model, data)  # type: ignore
+        handler(model, data)  # type: ignore  # pylint: disable=not-callable
 
         if not descriptions or not any(descriptions):
             return
