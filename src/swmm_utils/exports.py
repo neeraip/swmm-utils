@@ -1016,7 +1016,6 @@ def _summarize_per_feature(df, metrics: Iterable[str]) -> Dict[str, Any]:
         return out
 
     raw_cols = list(df.columns)
-    n_metrics_in_df = len(raw_cols)
 
     # Iterate over the small element axis (hundreds typically) and pull
     # the precomputed stats out of `agg`.
