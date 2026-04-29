@@ -14,6 +14,7 @@ disable=
     duplicate-code,                  # Acceptable for similar error handling
     line-too-long,                   # Let black handle line length
     too-many-boolean-expressions,    # Complex conditions are necessary
+    too-many-lines,                  # parser/exports modules are unavoidably large
 
 [FORMAT]
 # Line length

@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, TextIO, Union
+from typing import Any, Dict, List, Optional, TextIO, Union
 
 
 class SwmmInputDecoder:
@@ -144,80 +144,150 @@ class SwmmInputDecoder:
     def _parse_to_dict(self, file: TextIO) -> Dict:
         """Parse SWMM input file to dictionary format.
 
-        Args:
-            file: File object to read from
-
-        Returns:
-            Dictionary with parsed SWMM data
+        Description capture:
+          - Standalone ``;`` lines preceding a data row become that
+            row's ``description`` field. Multiple consecutive ``;`` lines
+            are joined with newlines.
+          - Inline ``; comment`` after data on the same line is captured
+            as the row's ``description`` if no preceding standalone
+            ``;`` line exists.
+          - ``;;`` (double-semicolon) column-header / divider lines are
+            ignored — they're never per-row descriptions.
+          - A blank line clears any pending description.
         """
-        model = {}
+        model: Dict[str, Any] = {}
         self.current_section = None
         self.line_number = 0
-        section_data = []
+        section_data: List[str] = []
+        section_desc: List[str] = []
+        pending_desc: List[str] = []
 
-        for line in file:
+        for raw in file:
             self.line_number += 1
-            line = self._preprocess_line(line)
+            stripped_full = raw.strip()
 
-            # Skip empty lines
-            if not line:
+            # Blank line → clears pending description (so a description
+            # block doesn't bleed across element rows separated by spacing).
+            if not stripped_full:
+                pending_desc = []
                 continue
 
-            # Check for section header
-            section_match = re.match(r"^\[([A-Z_]+)\]$", line)
+            # Column-header / divider lines (`;;`).
+            if stripped_full.startswith(";;"):
+                continue
+
+            # Standalone description line (`;<text>`).
+            if stripped_full.startswith(";"):
+                pending_desc.append(stripped_full[1:].strip())
+                continue
+
+            # Section header. Real .inp files in the wild mix case
+            # ([POLYGONS] vs [Polygons] vs [polygons]) — the SWMM engine
+            # accepts any, so we do too. Normalize to UPPERCASE so the
+            # dispatch table stays simple.
+            section_match = re.match(r"^\[([A-Za-z_]+)\]$", stripped_full)
             if section_match:
-                # Process previous section
                 if self.current_section and section_data:
-                    self._process_section(model, self.current_section, section_data)
-
-                # Start new section
-                self.current_section = section_match.group(1)
+                    self._process_section(
+                        model, self.current_section, section_data, section_desc
+                    )
+                self.current_section = section_match.group(1).upper()
                 section_data = []
+                section_desc = []
+                pending_desc = []
                 continue
 
-            # Add data to current section
-            if self.current_section:
-                section_data.append(line)
+            # Data row (possibly with a trailing `; comment`).
+            data_part, inline_desc = self._split_inline_comment(stripped_full)
+            if not data_part:
+                # Whole row was just an inline-comment after stripped text —
+                # treat as a description for the next data row.
+                if inline_desc:
+                    pending_desc.append(inline_desc)
+                continue
 
-        # Process final section
+            # Preceding `;` lines win over inline comments. Most authors
+            # use one or the other; if both are present the standalone
+            # text is usually the more deliberate description.
+            desc = "\n".join(pending_desc) if pending_desc else inline_desc
+            pending_desc = []
+
+            if self.current_section:
+                section_data.append(data_part)
+                section_desc.append(desc)
+
         if self.current_section and section_data:
-            self._process_section(model, self.current_section, section_data)
+            self._process_section(
+                model, self.current_section, section_data, section_desc
+            )
 
         return model
 
     def _preprocess_line(self, line: str) -> str:
         """Preprocess a line by removing comments and whitespace.
 
-        Args:
-            line: Raw line from file
-
-        Returns:
-            Cleaned line or empty string
+        Kept for backward compatibility with any external callers; the
+        main parse path now calls ``_split_inline_comment`` so that
+        descriptions can be captured rather than discarded.
         """
-        # Remove comments
         if ";" in line:
             line = line[: line.index(";")]
+        return line.strip()
 
-        # Strip whitespace
-        line = line.strip()
+    @staticmethod
+    def _split_inline_comment(line: str) -> "tuple[str, str]":
+        """Split a single line into (data, inline_comment).
 
-        return line
+        The first ``;`` separates the engine-relevant data from a
+        description — neither side is processed further here, just
+        stripped of surrounding whitespace.
+        """
+        if ";" not in line:
+            return line.strip(), ""
+        idx = line.index(";")
+        return line[:idx].strip(), line[idx + 1:].strip()
 
-    def _process_section(self, model: dict, section: str, data: List[str]):
+    def _process_section(
+        self,
+        model: dict,
+        section: str,
+        data: List[str],
+        descriptions: Optional[List[str]] = None,
+    ):
         """Process a section and add to model.
 
-        Args:
-            model: SwmmModel to populate
-            section: Section name
-            data: List of data lines
+        After the section handler runs, if it emitted a ``list[dict]`` of
+        the same length as ``descriptions`` and any description is
+        non-empty, attach it to the corresponding row's ``description``
+        field. Sections that emit dicts (options, times, report) drop
+        descriptions silently — they don't have per-row semantics.
         """
         handler_name = f"_parse_{section.lower()}"
         handler = getattr(self, handler_name, None)
 
-        if handler is not None:
-            handler(model, data)  # type: ignore
-        else:
+        if handler is None:
             print(f"Warning: No handler for section [{section}]")
+            return
+
+        keys_before = set(model.keys())
+        handler(model, data)  # type: ignore  # pylint: disable=not-callable
+
+        if not descriptions or not any(descriptions):
+            return
+
+        # Find the key(s) the handler wrote. Most write a single new key
+        # under the section name (or its plural, e.g. infiltration ->
+        # infiltrations). Track set diff so we don't depend on the
+        # naming convention.
+        new_keys = set(model.keys()) - keys_before
+        if not new_keys and section.lower() in model:
+            new_keys = {section.lower()}
+        for key in new_keys:
+            value = model[key]
+            if isinstance(value, list) and len(value) == len(descriptions):
+                for i, row in enumerate(value):
+                    if isinstance(row, dict) and descriptions[i]:
+                        row["description"] = descriptions[i]
 
     # Section-specific parsers
 
@@ -236,32 +306,176 @@ class SwmmInputDecoder:
         model["options"] = options
 
     def _parse_evaporation(self, model: dict, data: List[str]):
-        """Parse [EVAPORATION] section."""
-        evaporation = {}
+        """Parse [EVAPORATION] section.
+
+        SWMM allows multiple line types in one [EVAPORATION] block — e.g.
+        ``CONSTANT 0.0`` followed by ``DRY_ONLY NO`` and an optional
+        ``RECOVERY some_pat``. Each first token is unique, so we store
+        them as a dict keyed by the lowercased first token; the
+        remainder of the line is space-joined as the value (numeric
+        coercion happens at the editor / encoder boundary). For
+        ``MONTHLY`` and ``FILE`` the value is the 12 monthly figures
+        space-separated.
+        """
+        evaporation: Dict[str, Any] = {}
         for line in data:
             parts = line.split()
-            if parts:
-                evap_type = parts[0]
-                evaporation["type"] = evap_type
-                if len(parts) > 1:
-                    evaporation["values"] = parts[1:]
+            if not parts:
+                continue
+            key = parts[0].lower()
+            value = " ".join(parts[1:]) if len(parts) > 1 else ""
+            evaporation[key] = value
         model["evaporation"] = evaporation
 
+    def _parse_temperature(self, model: dict, data: List[str]):
+        """Parse [TEMPERATURE] section.
+
+        Multi-line block whose first token names the parameter:
+          TIMESERIES name
+          FILE filename startdate
+          WINDSPEED MONTHLY v1 ... v12   |   WINDSPEED FILE
+          SNOWMELT divtemp ATIwt rnmratio elev lat dtgmt
+          ADC IMPERVIOUS f1 f2 ... f10
+          ADC PERVIOUS   f1 f2 ... f10
+
+        ADC has two flavors that share a key — split them into
+        ``adc_impervious`` / ``adc_pervious`` so both round-trip
+        instead of one clobbering the other.
+        """
+        temperature: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            head = parts[0].upper()
+            rest = parts[1:]
+            if head == "ADC" and rest:
+                flavor = rest[0].upper()
+                values = " ".join(rest[1:])
+                if flavor == "IMPERVIOUS":
+                    temperature["adc_impervious"] = values
+                elif flavor == "PERVIOUS":
+                    temperature["adc_pervious"] = values
+                else:
+                    # Unknown ADC flavor — preserve as a generic key so
+                    # the data round-trips even if we don't understand it.
+                    temperature[f"adc_{flavor.lower()}"] = values
+            else:
+                temperature[head.lower()] = " ".join(rest)
+        model["temperature"] = temperature
+
+    def _parse_adjustments(self, model: dict, data: List[str]):
+        """Parse [ADJUSTMENTS] section.
+
+        Each line is one of TEMPERATURE / EVAPORATION / RAINFALL /
+        CONDUCTIVITY followed by 12 monthly values. Stored as a dict
+        keyed by lowercased token with the values space-joined.
+        """
+        adjustments: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            adjustments[parts[0].lower()] = " ".join(parts[1:])
+        model["adjustments"] = adjustments
+
+    def _parse_aquifers(self, model: dict, data: List[str]):
+        """Parse [AQUIFERS] section.
+
+        One row per aquifer:
+          name  por  wp  fc  hydcon  condslp  tension  upevap
+                losrate  gw_height  water_table  [upm_field]
+        """
+        aquifers = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 11:
+                aq = {
+                    "name": parts[0],
+                    "por": parts[1],
+                    "wp": parts[2],
+                    "fc": parts[3],
+                    "hydcon": parts[4],
+                    "condslp": parts[5],
+                    "tension": parts[6],
+                    "upevap": parts[7],
+                    "losrate": parts[8],
+                    "gw_height": parts[9],
+                    "water_table": parts[10],
+                }
+                if len(parts) > 11:
+                    aq["upm_field"] = parts[11]
+                aquifers.append(aq)
+        model["aquifers"] = aquifers
+
+    def _parse_snowpacks(self, model: dict, data: List[str]):
+        """Parse [SNOWPACKS] section.
+
+        Multi-row per pack. Column 2 selects the row flavor:
+          name PLOWABLE   Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name IMPERVIOUS Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name PERVIOUS   Cmin Cmax Tbase FWF SD0 FW0 SNN0
+          name REMOVAL    SDplow Fout Fimperv Fperv Fimm Fsubcatch [subcatch]
+
+        Stored as ``dict[name -> dict[flavor_lowered -> param_list]]``
+        so all four rows for one pack stay grouped.
+        """
+        snowpacks: Dict[str, Dict[str, List[str]]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            name = parts[0]
+            flavor = parts[1].lower()
+            values = parts[2:]
+            snowpacks.setdefault(name, {})[flavor] = values
+        model["snowpacks"] = snowpacks
+
     def _parse_raingages(self, model: dict, data: List[str]):
-        """Parse [RAINGAGES] section."""
+        """Parse [RAINGAGES] section.
+
+        SWMM 5.2 column layout is source-dependent. The trailing
+        portion of the row encodes:
+
+          ... TIMESERIES <series_name>
+          ... FILE       <"filename"> <station_id> <units>
+
+        For FILE source we additionally surface ``station`` and
+        ``units`` as their own columns (and strip surrounding quotes
+        from the filename) so the bottom data table and side panel
+        can render rain units instead of one squashed string. The
+        legacy ``file_or_station`` field is kept as the joined
+        trailing string so existing encoders / tests round-trip
+        unchanged.
+        """
         raingages = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 6:
-                gage = {
-                    "name": parts[0],
-                    "format": parts[1],
-                    "interval": parts[2],
-                    "scf": parts[3],
-                    "source": parts[4],
-                    "file_or_station": " ".join(parts[5:]),
-                }
-                raingages.append(gage)
+            if len(parts) < 6:
+                continue
+            gage = {
+                "name": parts[0],
+                "format": parts[1],
+                "interval": parts[2],
+                "scf": parts[3],
+                "source": parts[4],
+                "file_or_station": " ".join(parts[5:]),
+            }
+            source_upper = parts[4].upper()
+            if source_upper == "FILE" and len(parts) >= 8:
+                # Strip surrounding double-quotes from the filename
+                # token; SWMM allows quoted paths when they contain
+                # spaces, but at this point the tokenizer already
+                # split on whitespace so a path with spaces would
+                # already be broken — we only handle the simple
+                # quoted case.
+                file_name = parts[5].strip('"')
+                gage["data_param"] = file_name
+                gage["station"] = parts[6]
+                gage["units"] = parts[7]
+            elif source_upper == "TIMESERIES":
+                gage["data_param"] = parts[5]
+            raingages.append(gage)
         model["raingages"] = raingages
 
     def _parse_subcatchments(self, model: dict, data: List[str]):
@@ -345,19 +559,40 @@ class SwmmInputDecoder:
         model["junctions"] = junctions
 
     def _parse_outfalls(self, model: dict, data: List[str]):
-        """Parse [OUTFALLS] section."""
+        """Parse [OUTFALLS] section.
+
+        SWMM 5.2 column layout is type-dependent. The ``Stage Data``
+        column only exists for FIXED / TIDAL / TIMESERIES boundary
+        types — for FREE and NORMAL it is omitted entirely, so
+        whitespace-tokenizing the row would otherwise mis-shift
+        ``gated`` and ``route_to`` one column to the left.
+
+        Layouts:
+          FREE | NORMAL              : name elev type           gated route_to
+          FIXED | TIDAL | TIMESERIES : name elev type stage_data gated route_to
+        """
         outfalls = []
+        types_with_stage = {"FIXED", "TIDAL", "TIMESERIES"}
         for line in data:
             parts = line.split()
-            if len(parts) >= 3:
-                outfall = {"name": parts[0], "elevation": parts[1], "type": parts[2]}
+            if len(parts) < 3:
+                continue
+            outfall_type = parts[2].upper()
+            outfall = {"name": parts[0], "elevation": parts[1], "type": parts[2]}
+            if outfall_type in types_with_stage:
                 if len(parts) > 3:
                     outfall["stage_data"] = parts[3]
                 if len(parts) > 4:
                     outfall["gated"] = parts[4]
                 if len(parts) > 5:
                     outfall["route_to"] = parts[5]
-                outfalls.append(outfall)
+            else:
+                # FREE / NORMAL / unknown — no stage_data column.
+                if len(parts) > 3:
+                    outfall["gated"] = parts[3]
+                if len(parts) > 4:
+                    outfall["route_to"] = parts[4]
+            outfalls.append(outfall)
         model["outfalls"] = outfalls
 
     def _parse_storage(self, model: dict, data: List[str]):
@@ -376,6 +611,52 @@ class SwmmInputDecoder:
                 }
                 storage_nodes.append(storage)
         model["storage"] = storage_nodes
+
+    def _parse_dividers(self, model: dict, data: List[str]):
+        """Parse [DIVIDERS] section.
+
+        SWMM 5.2 row:
+          ``name elevation diverted_link type [args] max_depth init_depth surcharge_depth ponded_area``
+
+        ``type`` is one of CUTOFF / OVERFLOW / TABULAR / WEIR. Each
+        type has different number of `args`:
+          CUTOFF   <Q_min>
+          OVERFLOW                  (no args)
+          TABULAR  <curve_name>
+          WEIR     <Q_min> <h_max> <coefficient>
+
+        We only normalize the canonical fields (name / elevation /
+        diverted_link / type) and pass the type-specific args through
+        in a generic ``params`` list. Trailing depth / aponded columns
+        live AFTER the args, so we anchor them by counting from the
+        right rather than positional indexing.
+        """
+        dividers = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            entry: Dict[str, Any] = {
+                "name": parts[0],
+                "elevation": parts[1],
+                "diverted_link": parts[2],
+                "type": parts[3].upper(),
+            }
+            # Per-type arg count (per SWMM 5.2 [DIVIDERS] spec):
+            arg_counts = {"CUTOFF": 1, "OVERFLOW": 0, "TABULAR": 1, "WEIR": 3}
+            n_args = arg_counts.get(entry["type"], 0)
+            args_end = 4 + n_args
+            entry["params"] = parts[4:args_end]
+            tail = parts[args_end:]
+            # Trailing common-node columns (max_depth / init_depth /
+            # surcharge_depth / ponded_area). All optional; pad rather
+            # than guess so unknown columns aren't misnamed.
+            tail_keys = ("max_depth", "init_depth", "surcharge_depth", "ponded_area")
+            for i, key in enumerate(tail_keys):
+                if i < len(tail):
+                    entry[key] = tail[i]
+            dividers.append(entry)
+        model["dividers"] = dividers
 
     def _parse_conduits(self, model: dict, data: List[str]):
         """Parse [CONDUITS] section."""
@@ -566,21 +847,58 @@ class SwmmInputDecoder:
         model["patterns"] = patterns
 
     def _parse_curves(self, model: dict, data: List[str]):
-        """Parse [CURVES] section."""
-        curves = {}
+        """Parse [CURVES] section.
+
+        SWMM 5.2 row layouts:
+          First row of a curve  : ``Name Type X Y [X Y ...]``
+          Continuation rows     : ``Name X Y [X Y ...]``
+
+        The type keyword only appears on the first row of each curve.
+        We detect "is this the first row?" by looking up parts[1]
+        against the set of known curve-type keywords (case-insensitive).
+        Anything else is treated as a continuation row.
+        """
+        curves: Dict[str, Any] = {}
+        # Curve types defined by SWMM 5.2 spec. Anything else in
+        # parts[1] means we're on a continuation row, so parts[1] is
+        # an x-value not a type.
+        type_keywords = {
+            "STORAGE", "TIDAL", "RATING", "SHAPE", "CONTROL",
+            "DIVERSION", "WEIR",
+            "PUMP1", "PUMP2", "PUMP3", "PUMP4", "PUMP5",
+        }
 
         for line in data:
             parts = line.split()
-            if len(parts) >= 3:
-                name = parts[0]
+            if len(parts) < 3:
+                continue
+            name = parts[0]
+            data_start = 1
+            if parts[1].upper() in type_keywords:
+                # First row of this curve — capture the type and
+                # start point pairs at parts[2].
                 if name not in curves:
                     curves[name] = {"type": parts[1], "points": []}
-                # Pairs of x, y values
-                for i in range(1, len(parts), 2):
-                    if i + 1 < len(parts):
-                        curves[name]["points"].append(
-                            {"x": parts[i], "y": parts[i + 1]}
-                        )
+                else:
+                    # Curve already started but a duplicate first-row
+                    # is suspicious; tolerate by overwriting type.
+                    curves[name]["type"] = parts[1]
+                data_start = 2
+            else:
+                # Continuation row — type was set on a prior line.
+                if name not in curves:
+                    # No prior first-row seen → unknown type, leave
+                    # blank so the encoder falls through to its
+                    # default. Better than mis-reading parts[1] as a
+                    # type keyword.
+                    curves[name] = {"type": "", "points": []}
+                data_start = 1
+
+            for i in range(data_start, len(parts), 2):
+                if i + 1 < len(parts):
+                    curves[name]["points"].append(
+                        {"x": parts[i], "y": parts[i + 1]}
+                    )
 
         model["curves"] = curves
 
@@ -891,20 +1209,229 @@ class SwmmInputDecoder:
         model["files"] = files
 
     def _parse_hydrographs(self, model: dict, data: List[str]):
-        """Parse [HYDROGRAPHS] section (not supported - store as-is)."""
-        model["hydrographs"] = "\n".join(data)
+        """Parse [HYDROGRAPHS] section (RDII unit hydrographs).
+
+        Two row shapes share the section under one Name:
+          - Header row:    ``Name Raingage`` (2 tokens) — names the rain
+            gage feeding this hydrograph group.
+          - Response row:  ``Name Month Response R T K [Dmax Drecov Dinit]``
+            (6+ tokens) where Month is ``ALL`` or ``JAN``..``DEC`` and
+            Response is ``SHORT``/``MEDIUM``/``LONG``.
+
+        Emitted structure (round-trips via the encoder):
+
+            {
+              "HG1": {
+                "raingage": "RG1",
+                "responses": [
+                  {"month": "ALL", "response": "SHORT",
+                   "r": "0.033", "t": "1.5", "k": "2.0"},
+                  ...
+                ],
+              }
+            }
+
+        Numeric fields are kept as strings so values authored with
+        engine-specific precision round-trip without floating-point
+        reformatting.
+        """
+        hydrographs: Dict[str, Any] = {}
+        for line in data:
+            parts = line.split()
+            if not parts:
+                continue
+            name = parts[0]
+            entry = hydrographs.setdefault(
+                name, {"raingage": "", "responses": []}
+            )
+            if len(parts) == 2:
+                # Header row — names the rain gage.
+                entry["raingage"] = parts[1]
+            elif len(parts) >= 5:
+                # Response row. SWMM's reference format places Month then
+                # Response (SHORT/MEDIUM/LONG) before the R/T/K triple;
+                # accept the legacy ordering (Response then Month) as a
+                # fallback so .inp files saved by older tools round-trip.
+                tok1 = parts[1]
+                tok2 = parts[2]
+                month_set = {
+                    "ALL", "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+                }
+                if tok1.upper() in month_set:
+                    month, response = tok1, tok2
+                elif tok2.upper() in month_set:
+                    response, month = tok1, tok2
+                else:
+                    month, response = tok1, tok2
+                resp: Dict[str, Any] = {
+                    "month": month,
+                    "response": response,
+                }
+                tail_keys = ("r", "t", "k", "dmax", "drecov", "dinit")
+                for key, value in zip(tail_keys, parts[3:]):
+                    resp[key] = value
+                entry["responses"].append(resp)
+        model["hydrographs"] = hydrographs
+
+    def _parse_treatment(self, model: dict, data: List[str]):
+        """Parse [TREATMENT] section.
+
+        One row per (node, pollutant) with a free-form function string.
+        Format: ``Node  Pollutant  Function``. The function may contain
+        spaces and operators — we capture the entire remainder of the
+        line verbatim so engine-side parsing stays correct.
+        """
+        treatment = []
+        for line in data:
+            parts = line.split(None, 2)
+            if len(parts) >= 3:
+                treatment.append({
+                    "node": parts[0],
+                    "pollutant": parts[1],
+                    "function": parts[2],
+                })
+        model["treatment"] = treatment
+
+    def _parse_groundwater(self, model: dict, data: List[str]):
+        """Parse [GROUNDWATER] section.
+
+        SWMM 5.2 row: ``Subcat Aquifer Node Esurf A1 B1 A2 B2 A3 Dsw
+        Egwt Ebot Wgr Umc``. Older versions truncate after ``A3``.
+        Trailing optional columns are emitted only when present so the
+        round-trip preserves the source's column count.
+        """
+        groundwater = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            entry: Dict[str, Any] = {
+                "subcatchment": parts[0],
+                "aquifer": parts[1],
+                "node": parts[2],
+                "surface_elev": parts[3],
+                "a1": parts[4],
+            }
+            optional = (
+                "b1", "a2", "b2", "a3",
+                "dsw", "egwt", "ebot", "wgr", "umc",
+            )
+            for i, key in enumerate(optional, start=5):
+                if len(parts) > i:
+                    entry[key] = parts[i]
+            groundwater.append(entry)
+        model["groundwater"] = groundwater
+
+    def _parse_streets(self, model: dict, data: List[str]):
+        """Parse [STREETS] section (SWMM 5.2).
+
+        Row: ``Name Tcrown Hcurb Sx nRoad Hdep Wdep Sides [Tback Sback nBack]``.
+        Stored as ``dict[name -> params]`` so consumers can look up by
+        street name (matches the convention used for curves / patterns).
+        """
+        streets: Dict[str, Dict[str, Any]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 8:
+                continue
+            entry: Dict[str, Any] = {
+                "tcrown": parts[1],
+                "hcurb": parts[2],
+                "sx": parts[3],
+                "n_road": parts[4],
+                "h_dep": parts[5],
+                "w_dep": parts[6],
+                "sides": parts[7],
+            }
+            if len(parts) > 8:
+                entry["t_back"] = parts[8]
+            if len(parts) > 9:
+                entry["s_back"] = parts[9]
+            if len(parts) > 10:
+                entry["n_back"] = parts[10]
+            streets[parts[0]] = entry
+        model["streets"] = streets
+
+    def _parse_inlets(self, model: dict, data: List[str]):
+        """Parse [INLETS] section (SWMM 5.2).
+
+        Multi-line per inlet — first column is the inlet name, second
+        is the type token (``GRATE`` / ``CURB`` / ``SLOTTED`` /
+        ``CUSTOM`` / ``DROP_GRATE`` / ``DROP_CURB``), remainder is
+        type-dependent params. We collect rows as ``dict[name ->
+        list[{type, params}]]`` so a user-defined inlet that combines
+        e.g. a GRATE + a CURB row stays grouped under one name.
+        """
+        inlets: Dict[str, List[Dict[str, Any]]] = {}
+        for line in data:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[0]
+            kind = parts[1].upper()
+            params = parts[2:]
+            inlets.setdefault(name, []).append({
+                "type": kind,
+                "params": params,
+            })
+        model["inlets"] = inlets
+
+    def _parse_inlet_usage(self, model: dict, data: List[str]):
+        """Parse [INLET_USAGE] section (SWMM 5.2).
+
+        SWMM 5.2 row layout (column order matters — the previous
+        version of this handler skipped the ``Number`` column and
+        shifted every following field by one slot):
+
+          Conduit  Inlet  Node  Number  Pct_Clogged  Max_Flow
+                 hgt_Dstore  wdth_Dstore  Placement
+
+        Stored as a list keyed by conduit so consumers can join onto
+        link features. Optional trailing columns are emitted only
+        when present.
+        """
+        usage = []
+        for line in data:
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            entry: Dict[str, Any] = {
+                "conduit": parts[0],
+                "inlet": parts[1],
+                "node": parts[2],
+            }
+            optional = (
+                "number", "pct_clogged", "max_flow",
+                "h_dstore", "w_dstore", "placement",
+            )
+            for i, key in enumerate(optional, start=3):
+                if len(parts) > i:
+                    entry[key] = parts[i]
+            usage.append(entry)
+        model["inlet_usage"] = usage
 
     def _parse_rdii(self, model: dict, data: List[str]):
-        """Parse [RDII] section."""
+        """Parse [RDII] section.
+
+        SWMM 5.2 row: ``Node UnitHydrograph Sewer_Area [Factor]``.
+        ``Factor`` is optional and defaults to 1.0 per the engine — we
+        require only 3 columns and surface ``factor`` only when the
+        author wrote it. Real-world models routinely omit it (e.g.
+        Raytown), and the previous ``>= 4`` gate silently dropped
+        every row.
+        """
         rdii = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 4:
-                entry: Dict[str, Any] = {
-                    "node": parts[0],
-                    "unithydrograph": parts[1],
-                    "sewer_area": parts[2],
-                    "factor": parts[3],
-                }
-                rdii.append(entry)
+            if len(parts) < 3:
+                continue
+            entry: Dict[str, Any] = {
+                "node": parts[0],
+                "unithydrograph": parts[1],
+                "sewer_area": parts[2],
+            }
+            if len(parts) > 3:
+                entry["factor"] = parts[3]
+            rdii.append(entry)
         model["rdii"] = rdii

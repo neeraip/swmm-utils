@@ -65,13 +65,18 @@ class SwmmInputEncoder:
         self._write_title(model, file)
         self._write_options(model, file)
         self._write_evaporation(model, file)
+        self._write_temperature(model, file)
+        self._write_adjustments(model, file)
         self._write_raingages(model, file)
         self._write_subcatchments(model, file)
         self._write_subareas(model, file)
         self._write_infiltration(model, file)
+        self._write_aquifers(model, file)
+        self._write_snowpacks(model, file)
         self._write_junctions(model, file)
         self._write_outfalls(model, file)
         self._write_storage(model, file)
+        self._write_dividers(model, file)
         self._write_conduits(model, file)
         self._write_pumps(model, file)
         self._write_orifices(model, file)
@@ -91,6 +96,11 @@ class SwmmInputEncoder:
         self._write_lid_controls(model, file)
         self._write_lid_usage(model, file)
         self._write_files(model, file)
+        self._write_treatment(model, file)
+        self._write_groundwater(model, file)
+        self._write_streets(model, file)
+        self._write_inlets(model, file)
+        self._write_inlet_usage(model, file)
         self._write_hydrographs(model, file)
         self._write_rdii(model, file)
         self._write_timeseries(model, file)
@@ -318,6 +328,23 @@ class SwmmInputEncoder:
                     return value
         return default
 
+    @staticmethod
+    def _maybe_write_description(file: TextIO, row: Dict[str, Any]) -> None:
+        """Emit a leading ``;<desc>`` line for a row when it carries one.
+
+        Decoder captures preceding/inline ``;`` text into ``description``;
+        we round-trip it as a standalone comment line so any consumer
+        that follows the same convention reads the same description
+        back. The SWMM engine itself ignores comments. Multi-line
+        descriptions are emitted as one ``;`` line per physical line —
+        matches how authors usually wrote them in the first place.
+        """
+        desc = row.get("description")
+        if not desc:
+            return
+        for line in str(desc).split("\n"):
+            file.write(f";{line}\n")
+
     def _write_title(self, model: Dict[str, Any], file: TextIO):
         """Write [TITLE] section."""
         if "title" in model and model["title"]:
@@ -335,14 +362,127 @@ class SwmmInputEncoder:
                 file.write(f"{key:<20} {value}\n")
 
     def _write_evaporation(self, model: Dict[str, Any], file: TextIO):
-        """Write [EVAPORATION] section."""
+        """Write [EVAPORATION] section.
+
+        Two on-disk shapes are supported:
+          1. Modern keyed dict (decoder output) — ``{constant: "0.0",
+             dry_only: "NO", recovery: "pat1"}``. Each entry becomes
+             one line with the key uppercased back to the SWMM token.
+          2. Legacy ``{type, values}`` from older saves — emitted as a
+             single line. Kept so existing data.json files in S3 still
+             round-trip.
+        """
         if "evaporation" in model and model["evaporation"]:
-            self._write_section_header(file, "EVAPORATION")
             evap = model["evaporation"]
+            self._write_section_header(file, "EVAPORATION")
             file.write(";;Type       Parameters\n")
 
-            values = " ".join(evap.get("values", []))
-            file.write(f"{evap.get('type', 'CONSTANT'):<12} {values}\n")
+            if isinstance(evap, dict) and "type" in evap and len(evap) <= 2:
+                # Legacy shape — single-line emit for back-compat.
+                values = evap.get("values", [])
+                if isinstance(values, list):
+                    values = " ".join(values)
+                file.write(f"{str(evap.get('type', 'CONSTANT')):<12} {values}\n")
+                return
+
+            # Modern keyed shape — one line per entry.
+            for key, value in evap.items():
+                if value == "" or value is None:
+                    continue
+                file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_temperature(self, model: Dict[str, Any], file: TextIO):
+        """Write [TEMPERATURE] section.
+
+        Decoder splits ADC into ``adc_impervious`` / ``adc_pervious``
+        so they don't collide; we re-fan them out as two
+        ``ADC IMPERVIOUS …`` / ``ADC PERVIOUS …`` lines on emit.
+        """
+        if "temperature" not in model or not model["temperature"]:
+            return
+        temp = model["temperature"]
+        if not isinstance(temp, dict):
+            return
+        self._write_section_header(file, "TEMPERATURE")
+        file.write(";;Parameter  Values\n")
+        for key, value in temp.items():
+            if value == "" or value is None:
+                continue
+            if key == "adc_impervious":
+                file.write(f"ADC          IMPERVIOUS {value}\n")
+            elif key == "adc_pervious":
+                file.write(f"ADC          PERVIOUS   {value}\n")
+            elif key.startswith("adc_"):
+                file.write(
+                    f"ADC          {key[4:].upper()} {value}\n"
+                )
+            else:
+                file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_adjustments(self, model: Dict[str, Any], file: TextIO):
+        """Write [ADJUSTMENTS] section."""
+        if "adjustments" not in model or not model["adjustments"]:
+            return
+        adj = model["adjustments"]
+        if not isinstance(adj, dict):
+            return
+        self._write_section_header(file, "ADJUSTMENTS")
+        file.write(";;Parameter  Monthly Values\n")
+        for key, value in adj.items():
+            if value == "" or value is None:
+                continue
+            file.write(f"{key.upper():<12} {value}\n")
+
+    def _write_aquifers(self, model: Dict[str, Any], file: TextIO):
+        """Write [AQUIFERS] section."""
+        if "aquifers" not in model or not model["aquifers"]:
+            return
+        self._write_section_header(file, "AQUIFERS")
+        file.write(
+            ";;Name           Por  WP  FC  HydCon  CondSlp  Tension"
+            "  UpEvap  LosRate  GwHt  WatTab  UpmField\n"
+        )
+        for aq in model["aquifers"]:
+            cols = [
+                self._get_field(aq, "name"),
+                self._get_field(aq, "por"),
+                self._get_field(aq, "wp"),
+                self._get_field(aq, "fc"),
+                self._get_field(aq, "hydcon"),
+                self._get_field(aq, "condslp"),
+                self._get_field(aq, "tension"),
+                self._get_field(aq, "upevap"),
+                self._get_field(aq, "losrate"),
+                self._get_field(aq, "gw_height"),
+                self._get_field(aq, "water_table"),
+            ]
+            line = " ".join(str(c) for c in cols)
+            upm = self._get_field(aq, "upm_field", default="")
+            if upm:
+                line += f" {upm}"
+            file.write(line + "\n")
+
+    def _write_snowpacks(self, model: Dict[str, Any], file: TextIO):
+        """Write [SNOWPACKS] section.
+
+        ``snowpacks`` is ``dict[name -> dict[flavor -> values]]`` with
+        flavors plowable / impervious / pervious / removal. Emit one
+        line per (name, flavor) so all rows for a pack stay grouped.
+        """
+        if "snowpacks" not in model or not model["snowpacks"]:
+            return
+        self._write_section_header(file, "SNOWPACKS")
+        file.write(";;Name           Surface     Parameters\n")
+        for name, flavors in model["snowpacks"].items():
+            if not isinstance(flavors, dict):
+                continue
+            for flavor in ("plowable", "impervious", "pervious", "removal"):
+                values = flavors.get(flavor)
+                if values is None:
+                    continue
+                if isinstance(values, list):
+                    values = " ".join(str(v) for v in values)
+                file.write(f"{name:<16} {flavor.upper():<11} {values}\n")
 
     def _write_raingages(self, model: Dict[str, Any], file: TextIO):
         """Write [RAINGAGES] section."""
@@ -387,6 +527,7 @@ class SwmmInputEncoder:
                 curb_length = self._get_field(sub, "curb_length", "curb_len", default=0)
                 snowpack = self._get_field(sub, "snowpack", "snow_pack")
 
+                self._maybe_write_description(file, sub)
                 file.write(
                     f"{name:<16} {raingage:<16} {outlet:<16} "
                     f"{area:<8} {imperv:<8} {width:<8} "
@@ -472,6 +613,7 @@ class SwmmInputEncoder:
                     junc, "ponded_area", "pondedArea", default="0"
                 )
 
+                self._maybe_write_description(file, junc)
                 file.write(
                     f"{name:<16} {elevation:<10} {max_depth:<10} "
                     f"{init_depth:<10} {surcharge_depth:<10} {ponded_area}\n"
@@ -495,6 +637,7 @@ class SwmmInputEncoder:
                 gated = self._get_field(outfall, "gated", default="NO")
                 route_to = self._get_field(outfall, "route_to", "routeTo", default="")
 
+                self._maybe_write_description(file, outfall)
                 file.write(
                     f"{name:<16} {elevation:<10} {outfall_type:<10} "
                     f"{stage_data:<16} {gated:<8} {route_to}\n"
@@ -523,10 +666,45 @@ class SwmmInputEncoder:
                 curve_params = storage.get("curve_params", [])
                 params = " ".join(curve_params) if curve_params else ""
 
+                self._maybe_write_description(file, storage)
                 file.write(
                     f"{name:<16} {elevation:<8} {max_depth:<10} "
                     f"{init_depth:<10} {curve_type:<10} {params}\n"
                 )
+
+    def _write_dividers(self, model: Dict[str, Any], file: TextIO):
+        """Write [DIVIDERS] section.
+
+        Per-type ``params`` count (CUTOFF=1, OVERFLOW=0, TABULAR=1,
+        WEIR=3) restored from the decoder's ``params`` list. Common
+        trailing fields (max_depth / init_depth / surcharge_depth /
+        ponded_area) are emitted only when present so we don't
+        manufacture defaults the source didn't carry.
+        """
+        if "dividers" not in model or not model["dividers"]:
+            return
+        self._write_section_header(file, "DIVIDERS")
+        file.write(
+            ";;Name           Elevation  DivertedLink  Type       Params"
+            "  MaxDepth  InitDepth  SurchargeDepth  PondedArea\n"
+        )
+        for d in model["dividers"]:
+            self._maybe_write_description(file, d)
+            cols = [
+                self._get_field(d, "name"),
+                self._get_field(d, "elevation", default="0"),
+                self._get_field(d, "diverted_link", default=""),
+                self._get_field(d, "type", default="OVERFLOW"),
+            ]
+            params = d.get("params") or []
+            if isinstance(params, list):
+                cols.extend(str(p) for p in params)
+            for key in ("max_depth", "init_depth",
+                        "surcharge_depth", "ponded_area"):
+                v = self._get_field(d, key, default="")
+                if v != "":
+                    cols.append(str(v))
+            file.write(" ".join(str(c) for c in cols) + "\n")
 
     def _write_conduits(self, model: Dict[str, Any], file: TextIO):
         """Write [CONDUITS] section."""
@@ -549,6 +727,7 @@ class SwmmInputEncoder:
                 init_flow = self._get_field(conduit, "init_flow", "initFlow", default=0)
                 max_flow = self._get_field(conduit, "max_flow", "maxFlow", default=0)
 
+                self._maybe_write_description(file, conduit)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{length:<10} {roughness:<10} {in_offset:<10} "
@@ -572,6 +751,7 @@ class SwmmInputEncoder:
                 startup = self._get_field(pump, "startup", default="0")
                 shutoff = self._get_field(pump, "shutoff", default="0")
 
+                self._maybe_write_description(file, pump)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{curve:<16} {status:<8} {startup:<6} {shutoff}\n"
@@ -599,6 +779,7 @@ class SwmmInputEncoder:
                     orifice, "close_time", "closeTime", default="0"
                 )
 
+                self._maybe_write_description(file, orifice)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{orifice_type:<12} {offset:<10} {discharge_coeff:<10} "
@@ -633,6 +814,7 @@ class SwmmInputEncoder:
                 )
                 road_surf = self._get_field(weir, "road_surf", "roadSurf", default="")
 
+                self._maybe_write_description(file, weir)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{weir_type:<12} {crest_height:<10} {discharge_coeff:<10} "
@@ -757,32 +939,45 @@ class SwmmInputEncoder:
                         file.write(f"{name:<16} {' '.join(chunk)}\n")
 
     def _write_curves(self, model: Dict[str, Any], file: TextIO):
-        """Write [CURVES] section."""
+        """Write [CURVES] section.
+
+        SWMM 5.2 expects the curve TYPE keyword only on the FIRST row of
+        each curve; continuation rows are ``Name X-Value Y-Value`` with
+        the type column padded out as whitespace. Writing the type on
+        every row triggers ``ERROR 211: invalid number <Type>`` because
+        the engine then reads the type token where it expects an
+        x-value.
+        """
         if "curves" in model and model["curves"]:
             self._write_section_header(file, "CURVES")
             file.write(";;Name           Type       X-Value    Y-Value   \n")
 
-            # Handle both dict format (name -> {type, points}) and array format ([{name, type, points}])
+            def _emit_curve(name: str, curve_type: str, points):
+                # First row carries the type; continuation rows pad the
+                # type column with spaces so columns line up visually
+                # with the SWMM-authored format.
+                blank_type = " " * 10
+                for i, point in enumerate(points):
+                    x = self._get_field(point, "x", default="0")
+                    y = self._get_field(point, "y", default="0")
+                    type_col = f"{curve_type:<10}" if i == 0 else blank_type
+                    file.write(f"{name:<16} {type_col} {x:<10} {y}\n")
+
             curves_data = model["curves"]
             if isinstance(curves_data, dict):
-                # Dict format: iterate over items
                 for name, curve in curves_data.items():
-                    curve_type = curve.get("type", "STORAGE")
-                    points = curve.get("points", [])
-                    for point in points:
-                        x = self._get_field(point, "x", default="0")
-                        y = self._get_field(point, "y", default="0")
-                        file.write(f"{name:<16} {curve_type:<10} {x:<10} {y}\n")
+                    _emit_curve(
+                        name,
+                        curve.get("type", "STORAGE"),
+                        curve.get("points", []),
+                    )
             elif isinstance(curves_data, list):
-                # Array format: iterate over list
                 for curve in curves_data:
-                    name = self._get_field(curve, "name")
-                    curve_type = self._get_field(curve, "type", default="STORAGE")
-                    points = curve.get("points", [])
-                    for point in points:
-                        x = self._get_field(point, "x", default="0")
-                        y = self._get_field(point, "y", default="0")
-                        file.write(f"{name:<16} {curve_type:<10} {x:<10} {y}\n")
+                    _emit_curve(
+                        self._get_field(curve, "name"),
+                        self._get_field(curve, "type", default="STORAGE"),
+                        curve.get("points", []),
+                    )
 
     def _write_coordinates(self, model: Dict[str, Any], file: TextIO):
         """Write [COORDINATES] section."""
@@ -877,6 +1072,7 @@ class SwmmInputEncoder:
                 )
                 gated = self._get_field(outlet, "gated", default="NO")
 
+                self._maybe_write_description(file, outlet)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{offset:<10} {outlet_type:<12} {curve_name:<16} {gated}\n"
@@ -1097,15 +1293,52 @@ class SwmmInputEncoder:
                 file.write(f"{key:<20} {value}\n")
 
     def _write_hydrographs(self, model: Dict[str, Any], file: TextIO):
-        """Write [HYDROGRAPHS] section."""
-        if "hydrographs" in model and model["hydrographs"]:
-            self._write_section_header(file, "HYDROGRAPHS")
-            hydrographs_data = model["hydrographs"]
-            if isinstance(hydrographs_data, str):
-                file.write(hydrographs_data)
-            else:
-                for entry in hydrographs_data:
-                    file.write(f"{entry}\n")
+        """Write [HYDROGRAPHS] section.
+
+        Accepts three shapes for backward compatibility:
+          - ``str`` — verbatim block (legacy callers).
+          - ``list`` — pre-formatted lines (legacy callers).
+          - ``dict`` — structured form emitted by the current decoder
+            (``{name: {raingage, responses: [...]}}``).
+        """
+        if "hydrographs" not in model or not model["hydrographs"]:
+            return
+        self._write_section_header(file, "HYDROGRAPHS")
+        hydrographs_data = model["hydrographs"]
+        if isinstance(hydrographs_data, str):
+            file.write(hydrographs_data)
+            if not hydrographs_data.endswith("\n"):
+                file.write("\n")
+            return
+        if isinstance(hydrographs_data, list):
+            for entry in hydrographs_data:
+                file.write(f"{entry}\n")
+            return
+        # Structured dict form. Header row first (Name + Raingage),
+        # then one row per response.
+        file.write(
+            ";;Hydrograph    Rain Gage/Month     Response  "
+            "R       T       K       Dmax    Drecov   Dinit\n"
+        )
+        for name, entry in hydrographs_data.items():
+            raingage = entry.get("raingage", "") if isinstance(entry, dict) else ""
+            if raingage:
+                file.write(f"{name:<16}{raingage}\n")
+            responses = entry.get("responses", []) if isinstance(entry, dict) else []
+            for resp in responses:
+                if not isinstance(resp, dict):
+                    continue
+                row = [
+                    f"{name:<16}",
+                    f"{resp.get('month', 'ALL'):<20}",
+                    f"{resp.get('response', 'SHORT'):<10}",
+                ]
+                for key in ("r", "t", "k", "dmax", "drecov", "dinit"):
+                    val = resp.get(key)
+                    if val in (None, ""):
+                        continue
+                    row.append(f"{val:<8}")
+                file.write("".join(row).rstrip() + "\n")
 
     def _write_rdii(self, model: Dict[str, Any], file: TextIO):
         """Write [RDII] section."""
@@ -1122,3 +1355,111 @@ class SwmmInputEncoder:
                 file.write(
                     f"{node:<16} {unithydrograph:<16} {sewer_area:<8} {factor}\n"
                 )
+
+    def _write_treatment(self, model: Dict[str, Any], file: TextIO):
+        """Write [TREATMENT] section."""
+        if "treatment" not in model or not model["treatment"]:
+            return
+        self._write_section_header(file, "TREATMENT")
+        file.write(";;Node           Pollutant        Function\n")
+        for entry in model["treatment"]:
+            node = self._get_field(entry, "node")
+            pollutant = self._get_field(entry, "pollutant")
+            function = self._get_field(entry, "function", default="")
+            file.write(f"{node:<16} {pollutant:<16} {function}\n")
+
+    def _write_groundwater(self, model: Dict[str, Any], file: TextIO):
+        """Write [GROUNDWATER] section."""
+        if "groundwater" not in model or not model["groundwater"]:
+            return
+        self._write_section_header(file, "GROUNDWATER")
+        file.write(
+            ";;Subcatchment   Aquifer          Node             Esurf  A1  B1"
+            "  A2  B2  A3  Dsw  Egwt  Ebot  Wgr  Umc\n"
+        )
+        for gw in model["groundwater"]:
+            cols = [
+                self._get_field(gw, "subcatchment"),
+                self._get_field(gw, "aquifer"),
+                self._get_field(gw, "node"),
+                self._get_field(gw, "surface_elev"),
+                self._get_field(gw, "a1"),
+            ]
+            for key in ("b1", "a2", "b2", "a3",
+                        "dsw", "egwt", "ebot", "wgr", "umc"):
+                v = self._get_field(gw, key, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(" ".join(str(c) for c in cols) + "\n")
+
+    def _write_streets(self, model: Dict[str, Any], file: TextIO):
+        """Write [STREETS] section."""
+        if "streets" not in model or not model["streets"]:
+            return
+        self._write_section_header(file, "STREETS")
+        file.write(
+            ";;Name           Tcrown  Hcurb  Sx  nRoad  Hdep  Wdep  Sides"
+            "  Tback  Sback  nBack\n"
+        )
+        for name, st in model["streets"].items():
+            cols = [
+                self._get_field(st, "tcrown"),
+                self._get_field(st, "hcurb"),
+                self._get_field(st, "sx"),
+                self._get_field(st, "n_road"),
+                self._get_field(st, "h_dep", default="0"),
+                self._get_field(st, "w_dep", default="0"),
+                self._get_field(st, "sides", default="2"),
+            ]
+            for opt in ("t_back", "s_back", "n_back"):
+                v = self._get_field(st, opt, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(f"{name:<16} " + " ".join(str(c) for c in cols) + "\n")
+
+    def _write_inlets(self, model: Dict[str, Any], file: TextIO):
+        """Write [INLETS] section.
+
+        Decoder stores ``dict[name -> list[{type, params}]]`` so multi-line
+        inlet definitions (e.g. a CUSTOM with both GRATE + CURB rows) stay
+        grouped. Emit one line per (name, row) preserving original order.
+        """
+        if "inlets" not in model or not model["inlets"]:
+            return
+        self._write_section_header(file, "INLETS")
+        file.write(";;Name           Type        Parameters\n")
+        for name, rows in model["inlets"].items():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                kind = (row.get("type") or "").upper()
+                params = row.get("params") or []
+                params_str = " ".join(str(p) for p in params) if isinstance(params, list) else str(params)
+                file.write(f"{name:<16} {kind:<11} {params_str}\n")
+
+    def _write_inlet_usage(self, model: Dict[str, Any], file: TextIO):
+        """Write [INLET_USAGE] section.
+
+        Column order matches SWMM 5.2:
+          Conduit Inlet Node Number PctClogged MaxFlow Hgt_Dstore
+                 Wdth_Dstore Placement
+        """
+        if "inlet_usage" not in model or not model["inlet_usage"]:
+            return
+        self._write_section_header(file, "INLET_USAGE")
+        file.write(
+            ";;Conduit        Inlet            Node             Number"
+            "  PctClogged  MaxFlow  Hgt_Dstore  Wdth_Dstore  Placement\n"
+        )
+        for u in model["inlet_usage"]:
+            cols = [
+                self._get_field(u, "conduit"),
+                self._get_field(u, "inlet"),
+                self._get_field(u, "node"),
+            ]
+            for opt in ("number", "pct_clogged", "max_flow",
+                        "h_dstore", "w_dstore", "placement"):
+                v = self._get_field(u, opt, default="")
+                if v != "":
+                    cols.append(v)
+            file.write(" ".join(str(c) for c in cols) + "\n")
