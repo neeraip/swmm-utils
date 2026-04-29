@@ -977,7 +977,11 @@ def _safe_to_dataframe(ep: SwmmOutput, role: str):
     """Best-effort dataframe export; returns None on absence / failure."""
     try:
         df = ep.to_dataframe(element_type=role)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
+        # to_dataframe can raise a wide range of types depending on
+        # the SwmmOutput backend (KeyError, ValueError, AttributeError,
+        # IndexError, ...). The caller's contract is "absent or failed
+        # role → None"; collapsing all failures to that is intentional.
         return None
     if df is None or getattr(df, "empty", True):
         return None
@@ -1012,7 +1016,11 @@ def _summarize_per_feature(df, metrics: Iterable[str]) -> Dict[str, Any]:
         # DataFrame keyed by element_name with multi-level columns
         # (metric_col, stat).
         agg = grouped.agg(["min", "max", "mean"])
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
+        # pandas can raise several types here (TypeError on non-numeric
+        # columns, ValueError on shape mismatch, ...). Returning the
+        # partial ``out`` accumulator on any failure is the documented
+        # best-effort contract.
         return out
 
     raw_cols = list(df.columns)

@@ -1258,7 +1258,6 @@ class SwmmInputDecoder:
                     "ALL", "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
                 }
-                response_set = {"SHORT", "MEDIUM", "LONG"}
                 if tok1.upper() in month_set:
                     month, response = tok1, tok2
                 elif tok2.upper() in month_set:
