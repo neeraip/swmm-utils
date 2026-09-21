@@ -7,9 +7,12 @@ simulations including flows, depths, volumes, etc.
 """
 
 import struct
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, Iterator, List, Union
 from datetime import datetime, timedelta
+
+import numpy as np
 
 
 class SwmmOutputDecoder:
@@ -54,11 +57,22 @@ class SwmmOutputDecoder:
                 metadata["n_periods"],
             )
 
-            # Optionally read time series data
+            # Optionally read time series data.
+            #
+            # The results block is read in one go into a numpy array and
+            # kept as per-role views of it (see ``_read_time_series_arrays``).
+            # ``time_series`` is the same data in the dict-of-lists shape
+            # earlier versions built eagerly, now assembled per element on
+            # access: building it for every element up front is what took a
+            # 278 MB output past 8 GB of RAM and got the producer killed.
             time_series = None
+            time_series_arrays = None
             if include_time_series:
-                time_series = self._read_time_series_data(
-                    f, header, metadata, time_index
+                time_series_arrays = self._read_time_series_arrays(
+                    f, header, metadata
+                )
+                time_series = TimeSeriesRecords(
+                    time_series_arrays, metadata["labels"], time_index
                 )
 
             return {
@@ -66,6 +80,7 @@ class SwmmOutputDecoder:
                 "metadata": metadata,
                 "time_index": time_index,
                 "time_series": time_series,
+                "time_series_arrays": time_series_arrays,
                 "filepath": str(filepath),
             }
 
@@ -104,27 +119,31 @@ class SwmmOutputDecoder:
             "n_pollutants": n_pollutants,
         }
 
-    def _read_time_series_data(
+    def _read_time_series_arrays(
         self,
         f,
         header: Dict[str, Any],
         metadata: Dict[str, Any],
-        time_index: List[datetime],
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, np.ndarray]:
         """
-        Read time series data records from the binary file.
+        Read every reporting period's values as numpy arrays.
 
-        This method reads all the 4-byte record values for each time step.
-        Returns organized by element type and time step.
+        One ``np.fromfile`` over the results block, then views per role:
 
-        Args:
-            f: File handle positioned after metadata
-            header: Parsed header information
-            metadata: Parsed metadata information
-            time_index: List of timestamps
+            subcatchments  (n_periods, n_subcatchments, n_subcatch_vars)
+            nodes          (n_periods, n_nodes, n_node_vars)
+            links          (n_periods, n_links, n_link_vars)
+            system         (n_periods, n_system_vars)
 
-        Returns:
-            Dictionary with time series data organized by element type
+        All float32, all views of one buffer — the file's own size in RAM
+        and nothing more. The previous reader unpacked each value with
+        ``struct`` into a dict per element per period, which for a large
+        network is gigabytes of Python objects for a few hundred megabytes
+        of floats.
+
+        A file cut short (a run that stopped early) yields NaN for the
+        periods that are missing rather than zeros, so "no value" cannot be
+        mistaken for a dry pipe.
         """
         n_subcatch = header["n_subcatchments"]
         n_nodes = header["n_nodes"]
@@ -136,87 +155,51 @@ class SwmmOutputDecoder:
         n_link_vars = metadata["variables"]["link"]
         n_system_vars = metadata["variables"]["system"]
 
-        # Calculate total record size in bytes
-        # Each record starts with 8-byte timestamp (double) followed by data
-        record_size = (
-            8
-            + (  # 8 bytes for timestamp
-                n_subcatch * n_subcatch_vars
-                + n_nodes * n_node_vars
-                + n_links * n_link_vars
-                + n_system_vars
-            )
-            * 4
+        n_values = (
+            n_subcatch * n_subcatch_vars
+            + n_nodes * n_node_vars
+            + n_links * n_link_vars
+            + n_system_vars
         )
+        # Each record: an 8-byte timestamp (double) followed by the values.
+        record_dtype = np.dtype([("t", "<f8"), ("v", "<f4", (n_values,))])
 
-        # Find the start of time series data from the footer
+        # Where the records start, from the footer; how many the file
+        # actually holds, from its size.
+        f.seek(0, 2)
+        file_size = f.tell()
         f.seek(-6 * self._RECORD_SIZE, 2)
         footer = self._read_n_ints(f, 6)
         results_pos = footer[2]
+        available = max(0, (file_size - results_pos - 6 * self._RECORD_SIZE))
+        count = min(n_periods, available // record_dtype.itemsize) if n_values else 0
 
-        # Initialize storage for time series
-        time_series = {
-            "subcatchments": {},
-            "nodes": {},
-            "links": {},
-            "system": [],
-        }
+        if count > 0:
+            f.seek(results_pos)
+            records = np.fromfile(f, dtype=record_dtype, count=count)
+            values = records["v"]
+        else:
+            values = np.empty((0, n_values), dtype="<f4")
 
-        # Initialize nested structures for each element
-        for subcatch_label in metadata["labels"]["subcatchment"]:
-            time_series["subcatchments"][subcatch_label] = []
+        if values.shape[0] < n_periods:
+            padded = np.full((n_periods, n_values), np.nan, dtype="<f4")
+            padded[: values.shape[0]] = values
+            values = padded
 
-        for node_label in metadata["labels"]["node"]:
-            time_series["nodes"][node_label] = []
-
-        for link_label in metadata["labels"]["link"]:
-            time_series["links"][link_label] = []
-
-        # Read all time step records
-        for period in range(n_periods):
-            # Seek to start of record, then skip the 8-byte timestamp
-            f.seek(results_pos + period * record_size + 8)
-
-            # Read subcatchment data
-            for subcatch_label in metadata["labels"]["subcatchment"]:
-                values = [self._read_float(f) for _ in range(n_subcatch_vars)]
-                time_series["subcatchments"][subcatch_label].append(
-                    {
-                        "timestamp": time_index[period].isoformat(),
-                        "values": values,
-                    }
-                )
-
-            # Read node data
-            for node_label in metadata["labels"]["node"]:
-                values = [self._read_float(f) for _ in range(n_node_vars)]
-                time_series["nodes"][node_label].append(
-                    {
-                        "timestamp": time_index[period].isoformat(),
-                        "values": values,
-                    }
-                )
-
-            # Read link data
-            for link_label in metadata["labels"]["link"]:
-                values = [self._read_float(f) for _ in range(n_link_vars)]
-                time_series["links"][link_label].append(
-                    {
-                        "timestamp": time_index[period].isoformat(),
-                        "values": values,
-                    }
-                )
-
-            # Read system data
-            system_values = [self._read_float(f) for _ in range(n_system_vars)]
-            time_series["system"].append(
-                {
-                    "timestamp": time_index[period].isoformat(),
-                    "values": system_values,
-                }
+        offset = 0
+        arrays: Dict[str, np.ndarray] = {}
+        for role, count_elements, n_vars in (
+            ("subcatchments", n_subcatch, n_subcatch_vars),
+            ("nodes", n_nodes, n_node_vars),
+            ("links", n_links, n_link_vars),
+        ):
+            width = count_elements * n_vars
+            arrays[role] = values[:, offset : offset + width].reshape(
+                n_periods, count_elements, n_vars
             )
-
-        return time_series
+            offset += width
+        arrays["system"] = values[:, offset : offset + n_system_vars]
+        return arrays
 
     def _parse_metadata(self, f, header: Dict[str, Any]) -> Dict[str, Any]:
         """Parse metadata section (labels, properties, etc.)."""
@@ -401,3 +384,83 @@ class SwmmOutputDecoder:
         if len(data) < 8:
             return 0.0
         return struct.unpack("<d", data)[0]
+
+
+
+class TimeSeriesRecords(Mapping):
+    """
+    The time series in the shape earlier versions returned, built on demand.
+
+    ``data["time_series"]`` used to be ``{"nodes": {label: [{"timestamp",
+    "values"}, …]}, …}``, assembled eagerly for every element. This is the
+    same mapping — ``ts["nodes"]["J1"]`` gives the same list of records —
+    but a list is built only for the element asked for, from the arrays.
+    ``to_dict()`` builds all of it, for the JSON export that needs it.
+    """
+
+    ROLES = ("subcatchments", "nodes", "links", "system")
+
+    def __init__(
+        self,
+        arrays: Dict[str, np.ndarray],
+        labels: Dict[str, List[str]],
+        time_index: List[datetime],
+    ):
+        self._arrays = arrays
+        self._labels = {
+            "subcatchments": list(labels.get("subcatchment", [])),
+            "nodes": list(labels.get("node", [])),
+            "links": list(labels.get("link", [])),
+        }
+        self._stamps = [t.isoformat() for t in time_index]
+
+    def __getitem__(self, role: str):
+        if role == "system":
+            return _records(self._arrays["system"], self._stamps)
+        if role not in self._labels:
+            raise KeyError(role)
+        return _RoleRecords(self._arrays[role], self._labels[role], self._stamps)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.ROLES)
+
+    def __len__(self) -> int:
+        return len(self.ROLES)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Every element's records, materialised. Large for a large run."""
+        return {
+            role: (self[role] if role == "system" else dict(self[role].items()))
+            for role in self.ROLES
+        }
+
+
+class _RoleRecords(Mapping):
+    """One role's ``{label: [records]}``, each list built when asked for."""
+
+    def __init__(self, array: np.ndarray, labels: List[str], stamps: List[str]):
+        self._array = array
+        self._labels = labels
+        self._index = {label: i for i, label in enumerate(labels)}
+        self._stamps = stamps
+
+    def __getitem__(self, label: str) -> List[Dict[str, Any]]:
+        i = self._index[label]
+        return _records(self._array[:, i, :], self._stamps)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._labels)
+
+    def __len__(self) -> int:
+        return len(self._labels)
+
+    def __contains__(self, label: object) -> bool:
+        return label in self._index
+
+
+def _records(rows: np.ndarray, stamps: List[str]) -> List[Dict[str, Any]]:
+    values = rows.astype("float64").tolist()
+    return [
+        {"timestamp": stamp, "values": row}
+        for stamp, row in zip(stamps, values)
+    ]

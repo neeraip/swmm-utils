@@ -76,9 +76,13 @@ class SwmmOutputEncoder:
         if summary_func is not None:
             output_data["summary"] = summary_func()
 
-        # Add time series if it was loaded
-        if data.get("time_series") is not None:
-            output_data["time_series"] = data["time_series"]
+        # Add time series if it was loaded. The decoder hands back a lazy
+        # mapping over the arrays; JSON needs the whole thing built out.
+        time_series = data.get("time_series")
+        if time_series is not None:
+            if hasattr(time_series, "to_dict"):
+                time_series = time_series.to_dict()
+            output_data["time_series"] = time_series
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(
@@ -197,7 +201,7 @@ class SwmmOutputEncoder:
             df_summary = pd.DataFrame(summary_data)
             df_summary.to_parquet(dirpath / "summary.parquet", index=False)
 
-    def encode_to_dataframe(
+    def encode_to_dataframe(  # pylint: disable=too-many-return-statements
         self,
         data: Dict[str, Any],
         element_type: Optional[str] = None,
@@ -253,6 +257,11 @@ class SwmmOutputEncoder:
 
         time_series = data["time_series"]
         time_index = data.get("time_index", [])
+        # Straight from the arrays when the decoder produced them: a frame
+        # is then two index arrays and one reshaped slab, not a Python dict
+        # per row. The record-walking builders below remain for data built
+        # by hand in the old shape.
+        arrays = data.get("time_series_arrays")
 
         # Full export: return dict with all sections
         if element_type is None:
@@ -274,24 +283,31 @@ class SwmmOutputEncoder:
                 ]
             )
 
-            return {
-                "metadata": metadata_df,
-                "nodes": self._build_section_dataframe(
-                    time_series, "nodes", data["metadata"]["labels"]["node"], time_index
-                ),
-                "links": self._build_section_dataframe(
-                    time_series, "links", data["metadata"]["labels"]["link"], time_index
-                ),
-                "subcatchments": self._build_section_dataframe(
-                    time_series,
-                    "subcatchments",
-                    data["metadata"]["labels"]["subcatchment"],
-                    time_index,
-                ),
-            }
+            sections = {}
+            for role, label_key in (
+                ("nodes", "node"),
+                ("links", "link"),
+                ("subcatchments", "subcatchment"),
+            ):
+                labels = data["metadata"]["labels"][label_key]
+                if arrays is not None:
+                    sections[role] = self._section_dataframe_from_array(
+                        arrays[role], labels, time_index
+                    )
+                else:
+                    sections[role] = self._build_section_dataframe(
+                        time_series, role, labels, time_index
+                    )
+            return {"metadata": metadata_df, **sections}
 
         # Single element export
         if element_name is not None:
+            if arrays is not None and element_type in arrays:
+                label_key = {"nodes": "node", "links": "link", "subcatchments": "subcatchment"}.get(element_type)
+                labels = data["metadata"]["labels"].get(label_key, []) if label_key else []
+                return self._element_dataframe_from_array(
+                    arrays[element_type], labels, element_name, time_index
+                )
             return self._build_element_dataframe(
                 time_series, element_type, element_name, time_index
             )
@@ -316,8 +332,61 @@ class SwmmOutputEncoder:
             "subcatchments": "subcatchments",
         }[element_type]
 
+        if arrays is not None:
+            return self._section_dataframe_from_array(
+                arrays[ts_key], data["metadata"]["labels"][label_key], time_index
+            )
         return self._build_section_dataframe(
             time_series, ts_key, data["metadata"]["labels"][label_key], time_index
+        )
+
+    @staticmethod
+    def _section_dataframe_from_array(array, labels: list, time_index: list):
+        """
+        A section's MultiIndex frame from its ``(periods, elements, vars)`` array.
+
+        Rows are element-major — every period of the first element, then the
+        next — which is the order the record-walking builder produced and
+        the order ``exports._df_to_cube`` relies on within each element. The
+        index is built from its two levels' products, so it costs two integer
+        code arrays rather than a timestamp and a name per row.
+        """
+        import numpy as np
+        import pandas as pd
+
+        n_periods, n_elements, n_vars = array.shape
+        if n_periods == 0 or n_elements == 0:
+            return pd.DataFrame()
+
+        # float64, as the record-walking builder produced from Python
+        # floats: a caller doing arithmetic on the frame gets the same
+        # types it always did.
+        slab = np.transpose(array, (1, 0, 2)).reshape(n_elements * n_periods, n_vars).astype("float64")
+        index = pd.MultiIndex.from_product(
+            [list(labels), pd.DatetimeIndex(time_index)],
+            names=["element_name", "timestamp"],
+        ).swaplevel(0, 1)
+        return pd.DataFrame(
+            slab, index=index, columns=[f"value_{i}" for i in range(n_vars)]
+        )
+
+    @staticmethod
+    def _element_dataframe_from_array(array, labels: list, element_name: str, time_index: list):
+        """One element's ``(periods, vars)`` slice as a frame over time."""
+        import pandas as pd
+
+        try:
+            i = list(labels).index(element_name)
+        except ValueError:
+            return pd.DataFrame()
+        n_periods = array.shape[0]
+        if n_periods != len(time_index):
+            return pd.DataFrame()
+        rows = array[:, i, :].astype("float64")
+        return pd.DataFrame(
+            rows,
+            index=pd.Index(list(time_index), name="timestamp"),
+            columns=[f"value_{j}" for j in range(rows.shape[1])],
         )
 
     def _build_section_dataframe(

@@ -955,22 +955,64 @@ _SUB_METRICS: List[str] = [
 
 
 def _per_feature_summary(out_path: PathLike) -> Dict[str, Any]:
-    """Per-feature min/max/mean across periods, all roles."""
+    """
+    Per-feature min/max/mean across periods, all roles.
+
+    Reduced straight off the decoder's arrays, one ``axis=0`` pass per
+    role. This used to go through a DataFrame per role and a groupby, on
+    top of the decoder's dict per element per period — which is what put
+    a 4,400-node, 1,440-period run past 8 GB and got the producer killed
+    before ``report.json`` was written.
+    """
     summary: Dict[str, Any] = {"nodes": {}, "links": {}, "subcatchments": {}}
 
     with SwmmOutput(Path(out_path), load_time_series=True) as ep:
-        nodes_df = _safe_to_dataframe(ep, "nodes")
-        links_df = _safe_to_dataframe(ep, "links")
-        sub_df = _safe_to_dataframe(ep, "subcatchments")
-
-    if nodes_df is not None:
-        summary["nodes"] = _summarize_per_feature(nodes_df, _NODE_METRICS)
-    if links_df is not None:
-        summary["links"] = _summarize_per_feature(links_df, _LINK_METRICS)
-    if sub_df is not None:
-        summary["subcatchments"] = _summarize_per_feature(sub_df, _SUB_METRICS)
+        arrays = ep.time_series_arrays or {}
+        for role, metrics in (
+            ("nodes", _NODE_METRICS),
+            ("links", _LINK_METRICS),
+            ("subcatchments", _SUB_METRICS),
+        ):
+            array = arrays.get(role)
+            if array is None:
+                continue
+            summary[role] = _summarize_array(array, ep.labels_for(role), metrics)
 
     return summary
+
+
+def _summarize_array(array, labels: List[str], metrics: Iterable[str]) -> Dict[str, Any]:
+    """
+    ``{label: {metric: {min, max, mean}}}`` from a ``(periods, elements, vars)`` array.
+
+    A metric whose series holds a NaN — a period the run never reached —
+    is left out for that element, as the DataFrame path left it out.
+    """
+    import numpy as np
+
+    out: Dict[str, Any] = {}
+    n_periods, n_elements, n_vars = array.shape
+    if n_periods == 0 or n_elements == 0 or n_vars == 0:
+        return out
+
+    names = list(metrics)
+    columns = [names[j] if j < len(names) else f"value_{j}" for j in range(n_vars)]
+
+    with np.errstate(invalid="ignore"):
+        mins = np.min(array, axis=0).astype("float64")
+        maxs = np.max(array, axis=0).astype("float64")
+        means = np.mean(array, axis=0, dtype="float64")
+    keep = ~(np.isnan(mins) | np.isnan(maxs) | np.isnan(means))
+
+    mins_l, maxs_l, means_l, keep_l = mins.tolist(), maxs.tolist(), means.tolist(), keep.tolist()
+    for i, label in enumerate(labels[:n_elements]):
+        per_metric: Dict[str, Any] = {}
+        for j, column in enumerate(columns):
+            if not keep_l[i][j]:
+                continue
+            per_metric[column] = {"min": mins_l[i][j], "max": maxs_l[i][j], "mean": means_l[i][j]}
+        out[str(label)] = per_metric
+    return out
 
 
 def _safe_to_dataframe(ep: SwmmOutput, role: str):
@@ -1106,63 +1148,54 @@ def emit_results_parquet(
         Small descriptor dict: row count, column list, n_periods.
     """
     try:
-        import pandas as pd
-        import pyarrow as pa
         import pyarrow.parquet as pq
     except ImportError as e:
         raise ImportError(
-            "emit_results_parquet requires `pandas` and `pyarrow` (already "
-            "in install_requires — reinstall the package)."
+            "emit_results_parquet requires `pyarrow` (already in "
+            "install_requires — reinstall the package)."
         ) from e
 
     element_type_by_id = _classify_element_types(inp_path)
 
+    # Built role by role, straight from the decoder's arrays into Arrow,
+    # and written as one row group set per role. No pandas: the long frame
+    # for a big run is millions of rows, and a string object per row for
+    # three columns of it was most of what the old path cost.
     with SwmmOutput(Path(out_path), load_time_series=True) as ep:
         n_periods = ep.n_periods
         step_seconds = int(ep.report_interval.total_seconds()) if ep.report_interval else 1
-        node_df = _safe_to_dataframe(ep, "nodes")
-        link_df = _safe_to_dataframe(ep, "links")
-        sub_df = _safe_to_dataframe(ep, "subcatchments")
+        arrays = ep.time_series_arrays or {}
+        tables = []
+        for role_plural, role, metrics in (
+            ("nodes", "node", _NODE_METRICS),
+            ("links", "link", _LINK_METRICS),
+            ("subcatchments", "subcatchment", _SUB_METRICS),
+        ):
+            array = arrays.get(role_plural)
+            if array is None:
+                continue
+            table = _role_table(
+                array, ep.labels_for(role_plural), role=role, metrics=metrics,
+                element_type_by_id=element_type_by_id, step_seconds=step_seconds,
+            )
+            if table is not None:
+                tables.append(table)
 
-    frames = []
-    if node_df is not None:
-        frames.append(_prepare_role_frame(
-            node_df, role="node", metrics=_NODE_METRICS,
-            element_type_by_id=element_type_by_id,
-            step_seconds=step_seconds,
-        ))
-    if link_df is not None:
-        frames.append(_prepare_role_frame(
-            link_df, role="link", metrics=_LINK_METRICS,
-            element_type_by_id=element_type_by_id,
-            step_seconds=step_seconds,
-        ))
-    if sub_df is not None:
-        frames.append(_prepare_role_frame(
-            sub_df, role="subcatchment", metrics=_SUB_METRICS,
-            element_type_by_id=element_type_by_id,
-            step_seconds=step_seconds,
-        ))
-
-    if not frames:
-        df = pd.DataFrame(columns=_parquet_schema_columns())
-    else:
-        df = pd.concat(frames, ignore_index=True, sort=False)
-
-    # Materialize timestamps from period_seconds.
-    base = pd.Timestamp(_PERIOD_TS_BASE)
-    df["period_ts"] = base + pd.to_timedelta(df["period_seconds"].astype("int64"), unit="s")
-
-    df = _coerce_parquet_types(df)
-    table = pa.Table.from_pandas(df, preserve_index=False)
-
+    schema = _parquet_schema()
     out_path_local = Path(parquet_path)
     out_path_local.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, str(out_path_local), **_PARQUET_WRITER_KWARGS)
+    rows = 0
+    writer_kwargs = {k: v for k, v in _PARQUET_WRITER_KWARGS.items() if k != "row_group_size"}
+    with pq.ParquetWriter(str(out_path_local), schema, **writer_kwargs) as writer:
+        if not tables:
+            writer.write_table(schema.empty_table())
+        for table in tables:
+            writer.write_table(table, row_group_size=_PARQUET_WRITER_KWARGS["row_group_size"])
+            rows += table.num_rows
 
     return {
-        "rows": int(len(df)),
-        "columns": list(df.columns),
+        "rows": int(rows),
+        "columns": list(schema.names),
         "n_periods": int(n_periods),
         "report_time_step_seconds": step_seconds,
         "node_metrics": list(_NODE_METRICS),
@@ -1205,6 +1238,83 @@ def _parquet_schema_columns() -> list:
         *_LINK_METRICS,
         *_SUB_METRICS,
     ]
+
+
+def _parquet_schema():
+    """The sidecar's Arrow schema: plain strings, int32 periods, float32 metrics."""
+    import pyarrow as pa
+
+    fields = [
+        ("fid", pa.string()),
+        ("role", pa.string()),
+        ("element_type", pa.string()),
+        ("period_idx", pa.int32()),
+        ("period_ts", pa.timestamp("us")),
+        ("period_seconds", pa.int32()),
+    ]
+    fields += [(m, pa.float32()) for m in (*_NODE_METRICS, *_LINK_METRICS, *_SUB_METRICS)]
+    return pa.schema(fields)
+
+
+def _role_table(  # pylint: disable=too-many-arguments
+    array,
+    labels: List[str],
+    *,
+    role: str,
+    metrics: Iterable[str],
+    element_type_by_id: Dict[str, str],
+    step_seconds: int,
+):
+    """
+    One role's rows as an Arrow table in the sidecar schema.
+
+    Element-major, one row per (element, period). The three string columns
+    are taken from small dictionaries by index, so they cost an int32 per
+    row rather than a Python string; the metric columns are the array's
+    own float32 slabs. Metrics of the other roles are null.
+    """
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    n_periods, n_elements, n_vars = array.shape
+    if n_periods == 0 or n_elements == 0:
+        return None
+    n_rows = n_elements * n_periods
+    metrics = tuple(metrics)
+
+    slab = np.ascontiguousarray(np.transpose(array, (1, 0, 2))).reshape(n_rows, n_vars)
+
+    element_idx = np.repeat(np.arange(n_elements, dtype="int32"), n_periods)
+    period_idx = np.tile(np.arange(n_periods, dtype="int32"), n_elements)
+    period_seconds = (period_idx.astype("int64") * int(step_seconds)).astype("int32")
+    period_ts = (
+        np.datetime64(_PERIOD_TS_BASE, "us") + period_seconds.astype("timedelta64[s]")
+    ).astype("datetime64[us]")
+
+    label_list = [str(label) for label in labels[:n_elements]]
+    fid = pc.take(pa.array(label_list, type=pa.string()), pa.array(element_idx))
+    element_types = pa.array(
+        [element_type_by_id.get(label, role) for label in label_list], type=pa.string()
+    )
+    element_type = pc.take(element_types, pa.array(element_idx))
+    role_column = pc.take(pa.array([role], type=pa.string()), pa.array(np.zeros(n_rows, dtype="int32")))
+
+    columns = {
+        "fid": fid,
+        "role": role_column,
+        "element_type": element_type,
+        "period_idx": pa.array(period_idx, type=pa.int32()),
+        "period_ts": pa.array(period_ts, type=pa.timestamp("us")),
+        "period_seconds": pa.array(period_seconds, type=pa.int32()),
+    }
+    for name in (*_NODE_METRICS, *_LINK_METRICS, *_SUB_METRICS):
+        if name in metrics and metrics.index(name) < n_vars:
+            columns[name] = pa.array(slab[:, metrics.index(name)], type=pa.float32())
+        else:
+            columns[name] = pa.nulls(n_rows, type=pa.float32())
+    schema = _parquet_schema()
+    return pa.table([columns[name] for name in schema.names], schema=schema)
 
 
 def _prepare_role_frame(
@@ -1345,18 +1455,17 @@ def emit_results_zarr(
         n_periods = ep.n_periods
         report_interval = ep.report_interval
         step_seconds = int(report_interval.total_seconds()) if report_interval else 1
-
-        node_df = _safe_to_dataframe(ep, "nodes")
-        link_df = _safe_to_dataframe(ep, "links")
-        sub_df = _safe_to_dataframe(ep, "subcatchments")
+        arrays = ep.time_series_arrays or {}
 
     node_metrics = list(_NODE_METRICS)
     link_metrics = list(_LINK_METRICS)
     sub_metrics = list(_SUB_METRICS)
 
-    node_arr = _df_to_cube(node_df, node_ids, n_periods, node_metrics)
-    link_arr = _df_to_cube(link_df, link_ids, n_periods, link_metrics)
-    sub_arr = _df_to_cube(sub_df, sub_ids, n_periods, sub_metrics)
+    # The cube is the decoder's array with its first two axes swapped —
+    # one transpose per role, no DataFrame and no groupby in between.
+    node_arr = _array_to_cube(arrays.get("nodes"), len(node_ids), n_periods, len(node_metrics))
+    link_arr = _array_to_cube(arrays.get("links"), len(link_ids), n_periods, len(link_metrics))
+    sub_arr = _array_to_cube(arrays.get("subcatchments"), len(sub_ids), n_periods, len(sub_metrics))
 
     if sort_spatial:
         node_order = _zorder(node_ids, coords_by_id)
@@ -1443,6 +1552,29 @@ def _build_coords_lookup(coords_data: List[Dict[str, Any]]) -> Dict[str, tuple]:
             continue
         out[fid] = (x, y)
     return out
+
+
+def _array_to_cube(array, n_features: int, n_periods: int, n_metrics: int):
+    """
+    ``(features, periods, metrics)`` float32 from the decoder's
+    ``(periods, features, vars)`` array.
+
+    Only the first ``n_metrics`` variables are kept — the canonical ones;
+    pollutant columns follow them in SWMM's output and are not part of
+    the cube. Fewer variables than metrics, or no array at all, leave NaN.
+    """
+    import numpy as np
+
+    cube = np.full((n_features, n_periods, n_metrics), np.nan, dtype="float32")
+    if array is None:
+        return cube
+    periods, features, n_vars = array.shape
+    p = min(periods, n_periods)
+    f = min(features, n_features)
+    m = min(n_vars, n_metrics)
+    if p and f and m:
+        cube[:f, :p, :m] = np.transpose(array[:p, :f, :m], (1, 0, 2))
+    return cube
 
 
 def _df_to_cube(df, ordered_ids: list, n_periods: int, metrics: Iterable[str]):
