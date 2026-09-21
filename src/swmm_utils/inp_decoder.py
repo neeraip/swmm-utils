@@ -1094,14 +1094,27 @@ class SwmmInputDecoder:
         model["pollutants"] = pollutants
 
     def _parse_landuses(self, model: dict, data: List[str]):
-        """Parse [LANDUSES] section."""
+        """
+        Parse [LANDUSES] section.
+
+        SWMM's row is ``Name (SweepInterval Availability LastSweep)`` —
+        street-sweeping days between sweeps, the fraction of buildup a
+        sweep removes, and days since the last sweep. An earlier reading
+        took the second column for a percent-impervious figure, a field
+        this section has never had, and wrote it back as one column: the
+        engine refused the rendered file with ERROR 203 (too few items).
+        """
         landuses = []
         for line in data:
             parts = line.split()
             if len(parts) >= 1:
                 landuse = {"name": parts[0]}
                 if len(parts) > 1:
-                    landuse["percent_imperv"] = parts[1]
+                    landuse["sweep_interval"] = parts[1]
+                if len(parts) > 2:
+                    landuse["availability"] = parts[2]
+                if len(parts) > 3:
+                    landuse["last_swept"] = parts[3]
                 landuses.append(landuse)
         model["landuses"] = landuses
 

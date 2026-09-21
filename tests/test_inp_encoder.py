@@ -259,9 +259,8 @@ TS1                         1:00       0.5
     for i, l1 in enumerate(model1["landuses"]):
         l2 = model2["landuses"][i]
         assert l1["name"] == l2["name"], f"Landuse {i} name mismatch"
-        assert (
-            l1["percent_imperv"] == l2["percent_imperv"]
-        ), f"Landuse {i} percent_imperv mismatch"
+        for field in ("sweep_interval", "availability", "last_swept"):
+            assert l1.get(field) == l2.get(field), f"Landuse {i} {field} mismatch"
 
     assert "coverages" in model1 and "coverages" in model2, "Missing coverages section"
     assert len(model1["coverages"]) == len(
