@@ -150,6 +150,7 @@ The architecture uses Python dictionaries as the in-memory data model:
 - ✅ Three-level DataFrame export: full data, sections, or individual elements
 - ✅ Pollutant tracking and water quality data
 - ✅ Efficient memory usage (metadata-based access, not full time series loading)
+- ✅ Large runs: with `load_time_series=True` the results block is read once into numpy (`output.time_series_arrays`, shape `(periods, elements, vars)` per role) — a 278 MB `.out` with 8,700 elements summarises in under a second and ~400 MB of RAM
 - ✅ Element lookup by name
 
 ### Testing

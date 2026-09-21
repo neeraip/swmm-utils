@@ -39,6 +39,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
+        "numpy>=1.20",
         "pandas>=1.0.2",
         "pyarrow>=10.0.0",
     ],
