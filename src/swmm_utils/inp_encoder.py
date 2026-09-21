@@ -1180,16 +1180,29 @@ class SwmmInputEncoder:
                 )
 
     def _write_landuses(self, model: Dict[str, Any], file: TextIO):
-        """Write [LANDUSES] section."""
+        """
+        Write [LANDUSES] section.
+
+        A name alone is a valid row, and so is a name with only the sweep
+        interval: the engine reads the fields positionally and defaults
+        what is absent. A ``percent_imperv`` left in a data.json by the
+        earlier reading was the sweep interval, and is written as such.
+        """
         if "landuses" in model and model["landuses"]:
             self._write_section_header(file, "LANDUSES")
-            file.write(";;Name           PctImperv\n")
+            file.write(";;               Sweeping   Fraction   Last\n")
+            file.write(";;Name           Interval   Available  Swept\n")
 
             for landuse in model["landuses"]:
-                name = self._get_field(landuse, "name")
-                percent_imperv = self._get_field(landuse, "percent_imperv", default="0")
-
-                file.write(f"{name:<16} {percent_imperv}\n")
+                # Positional, so the row stops at the first field the model
+                # does not have; the engine defaults the rest to zero.
+                fields = [self._get_field(landuse, "name")]
+                for keys in (("sweep_interval", "percent_imperv"), ("availability",), ("last_swept",)):
+                    value = self._get_field(landuse, *keys, default=None)
+                    if value is None:
+                        break
+                    fields.append(str(value))
+                file.write(" ".join(f"{f:<16}" if i == 0 else f"{f:<10}" for i, f in enumerate(fields)).rstrip() + "\n")
 
     def _write_coverages(self, model: Dict[str, Any], file: TextIO):
         """Write [COVERAGES] section."""

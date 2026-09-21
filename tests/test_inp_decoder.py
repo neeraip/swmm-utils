@@ -443,8 +443,9 @@ Test Model
 FLOW_UNITS    CFS
 
 [LANDUSES]
-;;Name           PercentImperv
-LAND1            25
+;;               Sweeping   Fraction   Last
+;;Name           Interval   Available  Swept
+LAND1            25         0.5        3
 LAND2            75
 """
 
@@ -455,7 +456,10 @@ LAND2            75
     assert len(model["landuses"]) == 2
     land1 = model["landuses"][0]
     assert land1["name"] == "LAND1"
-    assert land1["percent_imperv"] == "25"
+    assert land1["sweep_interval"] == "25"
+    assert land1["availability"] == "0.5"
+    assert land1["last_swept"] == "3"
+    assert model["landuses"][1] == {"name": "LAND2", "sweep_interval": "75"}
 
 
 def test_decoder_coverages():
