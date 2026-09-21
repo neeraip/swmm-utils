@@ -192,6 +192,38 @@ def _link_coords(
     return coords
 
 
+def _place_unlocated_nodes(full: Dict[str, Any], coord_map: Dict[str, tuple]) -> List[str]:
+    """
+    Give every node in the node sections a coordinate, in place.
+
+    Nodes missing from [COORDINATES] are spaced along a row below the
+    lower-left corner of the located nodes' extent, one step apart, where a
+    step is 0.5% of that extent. With no located node at all the row starts
+    at the origin ten units apart. Returns the names placed.
+    """
+    placed: List[str] = []
+    missing = [
+        str(r.get("name", ""))
+        for section in ("junctions", "outfalls", "storage", "dividers")
+        for r in (full.get(section, []) or [])
+        if str(r.get("name", "")) and str(r.get("name", "")) not in coord_map
+    ]
+    if not missing:
+        return placed
+    if coord_map:
+        xs = [xy[0] for xy in coord_map.values()]
+        ys = [xy[1] for xy in coord_map.values()]
+        extent = max(max(xs) - min(xs), max(ys) - min(ys))
+        step = max(extent * 0.005, 1e-3)
+        x0, y0 = min(xs), min(ys) - 4 * step
+    else:
+        step, x0, y0 = 10.0, 0.0, 0.0
+    for i, nid in enumerate(missing):
+        coord_map[nid] = (x0 + i * step, y0)
+        placed.append(nid)
+    return placed
+
+
 def emit_geojson_layers(
     inp_path: PathLike,
     crs: Optional[str] = None,
@@ -249,6 +281,16 @@ def emit_geojson_layers(
                 coord_map[nid] = (float(c["x"]), float(c["y"]))
             except (KeyError, TypeError, ValueError):
                 continue
+
+    # A node the file places nowhere is still part of the network — the
+    # engine never reads [COORDINATES] — and dropping it here dropped every
+    # link touching it too, silently: a 4,569-node corpus model lost two
+    # conduits at import because one storage node had no coordinates, and
+    # the run then failed on the cross-sections still referring to them.
+    # Such nodes are laid out in a row just outside the model's extent, so
+    # they import, render and simulate; they are merely drawn in the wrong
+    # place, which the file was already.
+    _place_unlocated_nodes(full, coord_map)
 
     vertex_map: Dict[str, List[tuple]] = {}
     for v in full.get("vertices", []) or []:
@@ -822,6 +864,8 @@ def encode_with_overlay(
                 continue
             model[section] = value
 
+        _drop_dangling_references(model)
+
         # SwmmInput writes via a file on disk. Use a NamedTemporaryFile
         # (with delete=False on POSIX so we can close-then-read).
         with tempfile.NamedTemporaryFile(
@@ -837,6 +881,50 @@ def encode_with_overlay(
                 tmp_path.unlink()
             except OSError:
                 pass
+
+
+# Per-element sections whose rows name a link or a node, and what they name.
+_LINK_REFERENCE_SECTIONS = {"xsections": "link", "losses": "link"}
+_NODE_REFERENCE_SECTIONS = {"dwf": "node", "inflows": "node", "rdii": "node", "treatment": "node"}
+_LINK_SECTIONS = ("conduits", "pumps", "orifices", "weirs", "outlets")
+_NODE_SECTIONS = ("junctions", "outfalls", "storage", "dividers")
+
+
+def _drop_dangling_references(model: Any) -> Dict[str, int]:
+    """
+    Drop overlay rows that refer to a link or node the model does not have.
+
+    A data.json is written at import from the whole source file, and it
+    outlives the network: an element the import could not carry, or one
+    deleted since, keeps its cross-section, losses, dry-weather flow or
+    inflow rows there, and the rendered file then names an element that is
+    not defined — SWMM ERROR 209 — for a row nobody asked for. Returns how
+    many rows each section lost, for callers that want to say so.
+    """
+    def names(sections):
+        out = set()
+        for section in sections:
+            rows = model[section] if section in model else None
+            for r in rows or []:
+                name = r.get("name")
+                if name is not None:
+                    out.add(str(name))
+        return out
+
+    dropped: Dict[str, int] = {}
+    for refs, defined in (
+        (_LINK_REFERENCE_SECTIONS, names(_LINK_SECTIONS)),
+        (_NODE_REFERENCE_SECTIONS, names(_NODE_SECTIONS)),
+    ):
+        for section, key in refs.items():
+            rows = model[section] if section in model else None
+            if not rows:
+                continue
+            kept = [r for r in rows if str(r.get(key, "")) in defined]
+            if len(kept) != len(rows):
+                dropped[section] = len(rows) - len(kept)
+                model[section] = kept
+    return dropped
 
 
 # ---------------------------------------------------------------------------

@@ -459,7 +459,7 @@ LAND2            75
     assert land1["sweep_interval"] == "25"
     assert land1["availability"] == "0.5"
     assert land1["last_swept"] == "3"
-    assert model["landuses"][1] == {"name": "LAND2", "sweep_interval": "75"}
+    assert model["landuses"][1] == {"name": "LAND2", "sweep_interval": "75", "availability": "0", "last_swept": "0"}
 
 
 def test_decoder_coverages():
