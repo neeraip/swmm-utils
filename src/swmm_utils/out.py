@@ -74,6 +74,24 @@ class SwmmOutput:
         return self._data["metadata"]["report_interval"]
 
     @property
+    def time_series_arrays(self) -> Optional[Dict[str, Any]]:
+        """
+        The loaded time series as numpy arrays, or None if not loaded.
+
+        Keys ``subcatchments``, ``nodes``, ``links`` hold float32 arrays of
+        shape ``(n_periods, n_elements, n_vars)``; ``system`` holds
+        ``(n_periods, n_system_vars)``. Views of one buffer the size of the
+        file's results block — the way to read a large run without a
+        DataFrame per role.
+        """
+        return self._data.get("time_series_arrays")
+
+    def labels_for(self, element_type: str) -> List[str]:
+        """Element names for ``nodes`` / ``links`` / ``subcatchments``."""
+        key = {"nodes": "node", "links": "link", "subcatchments": "subcatchment"}[element_type]
+        return self._data["metadata"]["labels"][key]
+
+    @property
     def n_periods(self) -> int:
         """Get number of reporting periods (time steps)."""
         return self._data["metadata"]["n_periods"]
