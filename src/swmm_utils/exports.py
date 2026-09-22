@@ -201,26 +201,42 @@ def _place_unlocated_nodes(full: Dict[str, Any], coord_map: Dict[str, tuple]) ->
     step is 0.5% of that extent. With no located node at all the row starts
     at the origin ten units apart. Returns the names placed.
     """
-    placed: List[str] = []
-    missing = [
+    names = [
         str(r.get("name", ""))
         for section in ("junctions", "outfalls", "storage", "dividers")
         for r in (full.get(section, []) or [])
-        if str(r.get("name", "")) and str(r.get("name", "")) not in coord_map
     ]
+    return _place_unlocated(names, coord_map, coord_map)
+
+
+def _place_unlocated(
+    names: List[str], positions: Dict[str, tuple], extent_of: Dict[str, tuple]
+) -> List[str]:
+    """
+    Place every name missing from ``positions`` in a row below ``extent_of``.
+
+    Shared by nodes (placed against the node coordinates) and rain gages
+    (placed against the same node extent, since gages have no extent of
+    their own). Returns the names placed.
+    """
+    placed: List[str] = []
+    missing = [n for n in names if n and n not in positions]
     if not missing:
         return placed
-    if coord_map:
-        xs = [xy[0] for xy in coord_map.values()]
-        ys = [xy[1] for xy in coord_map.values()]
+    if extent_of:
+        xs = [xy[0] for xy in extent_of.values()]
+        ys = [xy[1] for xy in extent_of.values()]
         extent = max(max(xs) - min(xs), max(ys) - min(ys))
         step = max(extent * 0.005, 1e-3)
-        x0, y0 = min(xs), min(ys) - 4 * step
+        # Gages go one row further down than unlocated nodes would, so
+        # the two rows never overlap.
+        rows_below = 4 if positions is extent_of else 6
+        x0, y0 = min(xs), min(ys) - rows_below * step
     else:
-        step, x0, y0 = 10.0, 0.0, 0.0
-    for i, nid in enumerate(missing):
-        coord_map[nid] = (x0 + i * step, y0)
-        placed.append(nid)
+        step, x0, y0 = 10.0, 0.0, (0.0 if positions is extent_of else -20.0)
+    for i, name in enumerate(missing):
+        positions[name] = (x0 + i * step, y0)
+        placed.append(name)
     return placed
 
 
@@ -728,15 +744,20 @@ def emit_geojson_layers(
                 gage_xy[gid] = (float(sym["x"]), float(sym["y"]))
             except (KeyError, TypeError, ValueError):
                 continue
+        # A gage the file draws nowhere is still the gage its subcatchments
+        # name. Skipping it dropped it from the Rain Gages layer, and the
+        # render rebuilds [RAINGAGES] from that layer, so every subcatchment
+        # then referred to a gage the engine could not find. 46 of the 649
+        # corpus files carry gages with no [SYMBOLS] entry. They are placed
+        # the way unlocated nodes are: in a row just outside the extent.
+        _place_unlocated(
+            [str(r.get("name", "")) for r in raingages_section], gage_xy, coord_map,
+        )
         rain_feats: List[Dict[str, Any]] = []
         for r in raingages_section:
             rid = str(r.get("name", ""))
             xy = gage_xy.get(rid)
             if not xy:
-                # Raingages with no [SYMBOLS] entry have no spatial
-                # reference — skip rather than guess. The canonical
-                # Rain Gages layer can still exist (empty) for users
-                # to add gage symbols later.
                 continue
             row = _enrich_node({**r, "name": rid}, rid)
             rain_feats.append({

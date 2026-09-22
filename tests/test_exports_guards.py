@@ -98,3 +98,17 @@ def test_drop_dangling_reports_what_it_removed(tmp_path):
         model["xsections"] = list(model["xsections"]) + [{"link": "GONE", "shape": "CIRCULAR", "geom1": "1"}]
         assert _drop_dangling_references(model) == {"xsections": 1}
         assert _drop_dangling_references(model) == {}
+
+
+def test_a_rain_gage_without_a_symbol_is_still_imported(tmp_path):
+    """The render rebuilds [RAINGAGES] from this layer; a dropped gage breaks every subcatchment naming it."""
+    path = tmp_path / "rg.inp"
+    path.write_text(
+        INP.replace("[JUNCTIONS]", "[RAINGAGES]\nRG1 INTENSITY 1:00 1.0 TIMESERIES TS1\nRG2 INTENSITY 1:00 1.0 TIMESERIES TS1\n\n[SYMBOLS]\nRG1 50 50\n\n[JUNCTIONS]")
+    )
+    by_role = _layers(path)
+    gages = {f["id"]: f["geometry"]["coordinates"] for f in by_role["raingage"]}
+    assert set(gages) == {"RG1", "RG2"}
+    assert gages["RG1"] == [50.0, 50.0]
+    # RG2 is placed below the network, on a row of its own under the unlocated nodes' row.
+    assert gages["RG2"][1] < by_role["storage"][0]["geometry"]["coordinates"][1] < 0
