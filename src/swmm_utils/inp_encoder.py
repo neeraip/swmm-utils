@@ -1398,7 +1398,9 @@ class SwmmInputEncoder:
         for name, entry in hydrographs_data.items():
             raingage = entry.get("raingage", "") if isinstance(entry, dict) else ""
             if raingage:
-                file.write(f"{name:<16}{raingage}\n")
+                # A space after the padded name: a name sixteen or more
+                # characters wide would otherwise run into the gage.
+                file.write(f"{name:<16} {raingage}\n")
             responses = entry.get("responses", []) if isinstance(entry, dict) else []
             for resp in responses:
                 if not isinstance(resp, dict):

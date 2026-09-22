@@ -36,6 +36,8 @@ B  SF1  EXP  1.5  0.2  0  CURB
 
 [HYDROGRAPHS]
 HYDRO1  GAGE1
+RDII_Pattern_197  GAGE1
+RDII_Pattern_197  All  Short  0.1  1.5  2.5  0  0  0
 HYDRO1  All  Short  .1  1.000000  1.000000  0.000000  0.000000  0.000000
 HYDRO1  All  Medium  .1  2  2  0.000000  0.000000  0.000000
 """
@@ -99,6 +101,9 @@ def test_hydrograph_values_stay_separate_tokens(tmp_path):
     assert rows[0] == ["HYDRO1", "GAGE1"]
     assert rows[1] == ["HYDRO1", "All", "Short", ".1", "1.000000", "1.000000", "0.000000", "0.000000", "0.000000"]
     assert rows[2] == ["HYDRO1", "All", "Medium", ".1", "2", "2", "0.000000", "0.000000", "0.000000"]
+    # a name that fills the 16-wide column keeps a separator before the gage
+    assert rows[3] == ["RDII_Pattern_197", "GAGE1"]
+    assert rows[4][:3] == ["RDII_Pattern_197", "All", "Short"]
 
 
 def test_events_gwf_and_loadings_survive(tmp_path):
