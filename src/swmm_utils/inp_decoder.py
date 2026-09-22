@@ -1028,10 +1028,22 @@ class SwmmInputDecoder:
                     "offset": parts[3],
                     "type": parts[4],
                 }
-                if len(parts) > 5:
-                    outlet["curve_name"] = parts[5]
-                if len(parts) > 6:
-                    outlet["gated"] = parts[6]
+                # FUNCTIONAL/* rows carry a coefficient and an exponent
+                # before the gate flag; TABULAR/* rows carry a curve name.
+                # Reading both shapes as "curve, gated" put the exponent in
+                # the gate column and lost the flag itself.
+                if parts[4].upper().startswith("FUNCTIONAL"):
+                    if len(parts) > 5:
+                        outlet["qcoeff"] = parts[5]
+                    if len(parts) > 6:
+                        outlet["qexpon"] = parts[6]
+                    if len(parts) > 7:
+                        outlet["gated"] = parts[7]
+                else:
+                    if len(parts) > 5:
+                        outlet["curve_name"] = parts[5]
+                    if len(parts) > 6:
+                        outlet["gated"] = parts[6]
                 outlets.append(outlet)
         model["outlets"] = outlets
 
@@ -1085,14 +1097,19 @@ class SwmmInputDecoder:
         inflows = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 5:
+            # Node, constituent and time series make a complete row; the
+            # engine defaults everything after. A row of three (the common
+            # "node FLOW series") used to be dropped.
+            if len(parts) >= 3:
                 inflow = {
                     "node": parts[0],
                     "constituent": parts[1],
                     "timeseries": parts[2],
-                    "type": parts[3],
-                    "mfactor": parts[4],
                 }
+                if len(parts) > 3:
+                    inflow["type"] = parts[3]
+                if len(parts) > 4:
+                    inflow["mfactor"] = parts[4]
                 if len(parts) > 5:
                     inflow["sfactor"] = parts[5]
                 if len(parts) > 6:
@@ -1137,6 +1154,12 @@ class SwmmInputDecoder:
                     pollutant["kdecay"] = parts[5]
                 if len(parts) > 6:
                     pollutant["snow_only"] = parts[6]
+                # Co-pollutant, its fraction, the dry-weather and initial
+                # concentrations: optional to the engine (it defaults them
+                # to none/0), so dropping them silently changed the run.
+                for key, idx in (("co_pollutant", 7), ("co_fraction", 8), ("cdwf", 9), ("cinit", 10)):
+                    if len(parts) > idx:
+                        pollutant[key] = parts[idx]
                 pollutants.append(pollutant)
         model["pollutants"] = pollutants
 
@@ -1260,6 +1283,10 @@ class SwmmInputDecoder:
                     entry["from_impervious"] = parts[6]
                 if len(parts) > 7:
                     entry["to_pervious"] = parts[7]
+                # Optional tail: RptFile ("*" for none), DrainTo, FromPerv.
+                for key, idx in (("rpt_file", 8), ("drain_to", 9), ("from_pervious", 10)):
+                    if len(parts) > idx:
+                        entry[key] = parts[idx]
                 lid_usage.append(entry)
         model["lid_usage"] = lid_usage
 
