@@ -1109,12 +1109,13 @@ class SwmmInputDecoder:
             parts = line.split()
             if len(parts) >= 1:
                 landuse = {"name": parts[0]}
+                # The engine accepts a name alone or all four columns, and
+                # nothing in between; a row that gives the interval is read
+                # with the other two defaulted so it writes back whole.
                 if len(parts) > 1:
                     landuse["sweep_interval"] = parts[1]
-                if len(parts) > 2:
-                    landuse["availability"] = parts[2]
-                if len(parts) > 3:
-                    landuse["last_swept"] = parts[3]
+                    landuse["availability"] = parts[2] if len(parts) > 2 else "0"
+                    landuse["last_swept"] = parts[3] if len(parts) > 3 else "0"
                 landuses.append(landuse)
         model["landuses"] = landuses
 
