@@ -28,6 +28,14 @@ AQUIFER_COLUMNS = (
 )
 
 
+def _is_number(value: Any) -> bool:
+    try:
+        float(str(value))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 class SwmmInputEncoder:
     """Encode SWMM model dicts into .inp, .json, or .parquet file formats."""
 
@@ -1128,15 +1136,23 @@ class SwmmInputEncoder:
                 outlet_type = self._get_field(
                     outlet, "type", default="FUNCTIONAL/DEPTH"
                 )
-                curve_name = self._get_field(
-                    outlet, "curve_name", "curveName", default=""
-                )
-                gated = self._get_field(outlet, "gated", default="NO")
+                gated = str(self._get_field(outlet, "gated", default="NO"))
+                if str(outlet_type).upper().startswith("FUNCTIONAL"):
+                    qcoeff = self._get_field(outlet, "qcoeff", "curve_name", "curveName", default="0")
+                    qexpon = self._get_field(outlet, "qexpon", default="")
+                    if qexpon == "":
+                        # Rows decoded before 1.3 hold the exponent where
+                        # the gate flag goes; the flag itself was lost.
+                        qexpon, gated = (gated, "NO") if _is_number(gated) else ("1", gated)
+                    params = f"{qcoeff:<10} {qexpon:<10}"
+                else:
+                    curve_name = self._get_field(outlet, "curve_name", "curveName", default="")
+                    params = f"{curve_name:<16}"
 
                 self._maybe_write_description(file, outlet)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
-                    f"{offset:<10} {outlet_type:<12} {curve_name:<16} {gated}\n"
+                    f"{offset:<10} {outlet_type:<12} {params} {gated}\n"
                 )
 
     def _write_transects(self, model: Dict[str, Any], file: TextIO):
@@ -1201,7 +1217,7 @@ class SwmmInputEncoder:
 
                 file.write(
                     f"{node:<16} {constituent:<16} {timeseries:<16} "
-                    f"{inflow_type:<8} {mfactor:<8} {sfactor:<8} {baseline:<8} {pattern}\n"
+                    f"{inflow_type:<8} {mfactor:<8} {sfactor:<8} {baseline:<8} {pattern}".rstrip() + "\n"
                 )
 
     def _write_dwf(self, model: Dict[str, Any], file: TextIO):
@@ -1223,7 +1239,7 @@ class SwmmInputEncoder:
         if "pollutants" in model and model["pollutants"]:
             self._write_section_header(file, "POLLUTANTS")
             file.write(
-                ";;Name           Units    CRain    CGW      CRDII    KDecay   SnowOnly\n"
+                ";;Name           Units    CRain    CGW      CRDII    KDecay   SnowOnly CoPollutant      CoFrac   Cdwf     Cinit\n"
             )
 
             for pollutant in model["pollutants"]:
@@ -1234,10 +1250,15 @@ class SwmmInputEncoder:
                 crdii = self._get_field(pollutant, "crdii", default="0")
                 kdecay = self._get_field(pollutant, "kdecay", default="0")
                 snow_only = self._get_field(pollutant, "snow_only", default="NO")
+                co_pollutant = self._get_field(pollutant, "co_pollutant", default="*")
+                co_fraction = self._get_field(pollutant, "co_fraction", default="0.0")
+                cdwf = self._get_field(pollutant, "cdwf", default="0.0")
+                cinit = self._get_field(pollutant, "cinit", default="0.0")
 
                 file.write(
                     f"{name:<16} {units:<8} {crain:<8} {cgw:<8} "
-                    f"{crdii:<8} {kdecay:<8} {snow_only}\n"
+                    f"{crdii:<8} {kdecay:<8} {snow_only:<8} "
+                    f"{co_pollutant:<16} {co_fraction:<8} {cdwf:<8} {cinit}\n"
                 )
 
     def _write_landuses(self, model: Dict[str, Any], file: TextIO):
@@ -1352,11 +1373,16 @@ class SwmmInputEncoder:
                 init_saturation = self._get_field(entry, "init_saturation", default="0")
                 from_impervious = self._get_field(entry, "from_impervious", default="0")
                 to_pervious = self._get_field(entry, "to_pervious", default="0")
+                tail = [self._get_field(entry, k, default="") for k in ("rpt_file", "drain_to", "from_pervious")]
+                while tail and tail[-1] == "":
+                    tail.pop()
+                # A later column needs every earlier one; "*" is "no file".
+                tail = [t if t != "" else ("*" if i == 0 else "0") for i, t in enumerate(tail)]
 
                 file.write(
                     f"{subcatchment:<16} {lid_control:<16} {number:<8} "
                     f"{area:<8} {width:<8} {init_saturation:<8} "
-                    f"{from_impervious:<8} {to_pervious}\n"
+                    f"{from_impervious:<8} {to_pervious}" + "".join(f" {t}" for t in tail) + "\n"
                 )
 
     def _write_files(self, model: Dict[str, Any], file: TextIO):

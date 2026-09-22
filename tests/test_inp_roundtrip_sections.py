@@ -34,6 +34,22 @@ B  SF1  EXP  1.5  0.2  0  CURB
 [LOADINGS]
 100  SF1  40.000000  SF2  2.5
 
+[POLLUTANTS]
+TSS  MG/L  10.000000  0.000000  0.000000  0.000000  NO  *  0.000000  10.000000  0.000000
+TP   MG/L  1  0  0  0  NO
+
+[OUTLETS]
+HIGHFLOW  80608A  82309A  0.000000  FUNCTIONAL/DEPTH  10.000000  0.500000  YES
+TAB1      80608A  82309A  0.000000  TABULAR/HEAD      RATING1  NO
+
+[INFLOWS]
+0    FLOW  1
+N2   FLOW  TS2  FLOW  1.0  1.0  0  P1
+
+[LID_USAGE]
+S1  RAINBARRELS  32  6193.687500  12.000000  0.000000  17.000000  1  *
+S2  BIOCELL      1   100  10  0  50  0  *  S3  0
+
 [HYDROGRAPHS]
 HYDRO1  GAGE1
 RDII_Pattern_197  GAGE1
@@ -121,3 +137,44 @@ def test_events_gwf_and_loadings_survive(tmp_path):
 def test_data_json_carries_the_sections_the_render_needs():
     for section in ("events", "gwf", "loadings", "adjustments", "streets", "inlets", "inlet_usage", "profiles"):
         assert section in NON_SPATIAL_SECTIONS, section
+
+
+def test_pollutant_keeps_the_dwf_and_initial_concentrations(tmp_path):
+    model, out = _roundtrip(tmp_path)
+    tss = model["pollutants"][0]
+    assert (tss["co_pollutant"], tss["co_fraction"], tss["cdwf"], tss["cinit"]) == ("*", "0.000000", "10.000000", "0.000000")
+    assert out["POLLUTANTS"][0] == ["TSS", "MG/L", "10.000000", "0.000000", "0.000000", "0.000000", "NO", "*", "0.000000", "10.000000", "0.000000"]
+    # a seven-column row writes back whole with the engine's defaults
+    assert out["POLLUTANTS"][1] == ["TP", "MG/L", "1", "0", "0", "0", "NO", "*", "0.0", "0.0", "0.0"]
+
+
+def test_outlet_keeps_its_gate_flag_for_both_shapes(tmp_path):
+    model, out = _roundtrip(tmp_path)
+    fun, tab = model["outlets"]
+    assert (fun["qcoeff"], fun["qexpon"], fun["gated"]) == ("10.000000", "0.500000", "YES")
+    assert (tab["curve_name"], tab["gated"]) == ("RATING1", "NO")
+    assert out["OUTLETS"][0] == ["HIGHFLOW", "80608A", "82309A", "0.000000", "FUNCTIONAL/DEPTH", "10.000000", "0.500000", "YES"]
+    assert out["OUTLETS"][1] == ["TAB1", "80608A", "82309A", "0.000000", "TABULAR/HEAD", "RATING1", "NO"]
+
+
+def test_outlet_rows_decoded_by_older_versions_still_render(tmp_path):
+    from swmm_utils.inp_encoder import SwmmInputEncoder
+    legacy = {"outlets": [{"name": "F", "from_node": "A", "to_node": "B", "offset": "0", "type": "FUNCTIONAL/DEPTH",
+                           "curve_name": "10.0", "gated": "0.5"}]}
+    p = tmp_path / "legacy.inp"; SwmmInputEncoder().encode_to_inp_file(legacy, str(p))
+    assert _sections(p.read_text())["OUTLETS"][0] == ["F", "A", "B", "0", "FUNCTIONAL/DEPTH", "10.0", "0.5", "NO"]
+
+
+def test_inflow_of_three_columns_is_kept(tmp_path):
+    model, out = _roundtrip(tmp_path)
+    assert model["inflows"][0] == {"node": "0", "constituent": "FLOW", "timeseries": "1"}
+    assert out["INFLOWS"][0][:3] == ["0", "FLOW", "1"]
+    assert out["INFLOWS"][1] == ["N2", "FLOW", "TS2", "FLOW", "1.0", "1.0", "0", "P1"]
+
+
+def test_lid_usage_keeps_the_drain_to_columns(tmp_path):
+    model, out = _roundtrip(tmp_path)
+    assert model["lid_usage"][0]["rpt_file"] == "*" and "drain_to" not in model["lid_usage"][0]
+    assert (model["lid_usage"][1]["drain_to"], model["lid_usage"][1]["from_pervious"]) == ("S3", "0")
+    assert out["LID_USAGE"][0] == ["S1", "RAINBARRELS", "32", "6193.687500", "12.000000", "0.000000", "17.000000", "1", "*"]
+    assert out["LID_USAGE"][1] == ["S2", "BIOCELL", "1", "100", "10", "0", "50", "0", "*", "S3", "0"]
