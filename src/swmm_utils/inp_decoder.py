@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Union
 
 
+# [AQUIFERS] columns after the name, in reference-manual order.
+AQUIFER_FIELDS = (
+    "por", "wp", "fc", "ks", "kslope", "tslope",
+    "etu", "ets", "seep", "ebot", "egw", "umc",
+)
+
+
 class SwmmInputDecoder:
     """Decode SWMM input (.inp) files into Python dict structures."""
 
@@ -379,33 +386,73 @@ class SwmmInputDecoder:
             adjustments[parts[0].lower()] = " ".join(parts[1:])
         model["adjustments"] = adjustments
 
+    def _parse_gwf(self, model: dict, data: List[str]):
+        """Parse [GWF] section (custom groundwater flow equations).
+
+        Row: ``Subcatchment  LATERAL|DEEP  <expression>``. The expression
+        is free text with spaces, so everything after the flow type is
+        kept verbatim.
+        """
+        gwf = []
+        for line in data:
+            parts = line.split(None, 2)
+            if len(parts) >= 3:
+                gwf.append({"subcatchment": parts[0], "type": parts[1].upper(), "expression": parts[2].strip()})
+        model["gwf"] = gwf
+
+    def _parse_loadings(self, model: dict, data: List[str]):
+        """Parse [LOADINGS] section (initial pollutant buildup).
+
+        Row: ``Subcatchment  Pollutant  InitBuildup [Pollutant InitBuildup ...]``;
+        one entry is stored per (subcatchment, pollutant) pair.
+        """
+        loadings = []
+        for line in data:
+            parts = line.split()
+            for i in range(1, len(parts) - 1, 2):
+                loadings.append({"subcatchment": parts[0], "pollutant": parts[i], "buildup": parts[i + 1]})
+        model["loadings"] = loadings
+
+    def _parse_events(self, model: dict, data: List[str]):
+        """Parse [EVENTS] section (SWMM 5.2).
+
+        Each row is a period the engine restricts routing to:
+          Start_Date  Start_Time  End_Date  End_Time
+        Stored as ``{"start": "MM/DD/YYYY HH:MM", "end": ...}`` per row.
+        A file whose events are dropped silently routes the whole
+        simulation period instead, so the section has to survive.
+        """
+        events = []
+        for line in data:
+            parts = line.split()
+            if len(parts) >= 4:
+                events.append({"start": f"{parts[0]} {parts[1]}", "end": f"{parts[2]} {parts[3]}"})
+        model["events"] = events
+
     def _parse_aquifers(self, model: dict, data: List[str]):
         """Parse [AQUIFERS] section.
 
-        One row per aquifer:
-          name  por  wp  fc  hydcon  condslp  tension  upevap
-                losrate  gw_height  water_table  [upm_field]
+        SWMM 5.1+ row, twelve numbers after the name and an optional
+        evaporation pattern:
+
+          Name  Por  WP  FC  Ks  Kslp  Tslp  ETu  ETs  Seep  Ebot  Egw  Umc  [Epat]
+
+        Stored under the reference-manual names (``AQUIFER_FIELDS``). An
+        earlier version of this handler stopped at ten numbers and
+        mislabelled the tail, so a re-encoded file lost ``Umc`` and the
+        engine refused it with "too few items".
         """
         aquifers = []
         for line in data:
             parts = line.split()
-            if len(parts) >= 11:
-                aq = {
-                    "name": parts[0],
-                    "por": parts[1],
-                    "wp": parts[2],
-                    "fc": parts[3],
-                    "hydcon": parts[4],
-                    "condslp": parts[5],
-                    "tension": parts[6],
-                    "upevap": parts[7],
-                    "losrate": parts[8],
-                    "gw_height": parts[9],
-                    "water_table": parts[10],
-                }
-                if len(parts) > 11:
-                    aq["upm_field"] = parts[11]
-                aquifers.append(aq)
+            if len(parts) < 2:
+                continue
+            aq: Dict[str, Any] = {"name": parts[0]}
+            for key, value in zip(AQUIFER_FIELDS, parts[1:]):
+                aq[key] = value
+            if len(parts) > 1 + len(AQUIFER_FIELDS):
+                aq["epat"] = parts[1 + len(AQUIFER_FIELDS)]
+            aquifers.append(aq)
         model["aquifers"] = aquifers
 
     def _parse_snowpacks(self, model: dict, data: List[str]):
@@ -1149,6 +1196,10 @@ class SwmmInputDecoder:
                     entry["coeff2"] = parts[4]
                 if len(parts) > 5:
                     entry["coeff3"] = parts[5]
+                if len(parts) > 6:
+                    # AREA or CURB: what the buildup is normalised by.
+                    # SWMM 5.1+ requires it; a row without it is rejected.
+                    entry["per_unit"] = parts[6]
                 buildup.append(entry)
         model["buildup"] = buildup
 

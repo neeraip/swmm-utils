@@ -16,6 +16,18 @@ from typing import Any, Dict, Optional, TextIO, Union, overload
 from pandas import DataFrame
 
 
+# [AQUIFERS] columns after the name: (current key, legacy key or None).
+# The legacy keys are what versions before 1.3 stored; their tail was
+# shifted (``losrate`` held ETs, ``gw_height`` Seep, ``water_table``
+# Ebot, ``upm_field`` Egw) and ``umc`` was dropped.
+AQUIFER_COLUMNS = (
+    ("por", None), ("wp", None), ("fc", None),
+    ("ks", "hydcon"), ("kslope", "condslp"), ("tslope", "tension"),
+    ("etu", "upevap"), ("ets", "losrate"), ("seep", "gw_height"),
+    ("ebot", "water_table"), ("egw", "upm_field"), ("umc", None),
+)
+
+
 class SwmmInputEncoder:
     """Encode SWMM model dicts into .inp, .json, or .parquet file formats."""
 
@@ -67,6 +79,7 @@ class SwmmInputEncoder:
         self._write_evaporation(model, file)
         self._write_temperature(model, file)
         self._write_adjustments(model, file)
+        self._write_events(model, file)
         self._write_raingages(model, file)
         self._write_subcatchments(model, file)
         self._write_subareas(model, file)
@@ -93,11 +106,13 @@ class SwmmInputEncoder:
         self._write_coverages(model, file)
         self._write_buildup(model, file)
         self._write_washoff(model, file)
+        self._write_loadings(model, file)
         self._write_lid_controls(model, file)
         self._write_lid_usage(model, file)
         self._write_files(model, file)
         self._write_treatment(model, file)
         self._write_groundwater(model, file)
+        self._write_gwf(model, file)
         self._write_streets(model, file)
         self._write_inlets(model, file)
         self._write_inlet_usage(model, file)
@@ -433,34 +448,80 @@ class SwmmInputEncoder:
                 continue
             file.write(f"{key.upper():<12} {value}\n")
 
+    def _write_gwf(self, model: Dict[str, Any], file: TextIO):
+        """Write [GWF] section: one custom groundwater flow equation per row."""
+        rows = model.get("gwf")
+        if not rows:
+            return
+        self._write_section_header(file, "GWF")
+        file.write(";;Subcatchment   Flow     Equation\n")
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            sub = self._get_field(r, "subcatchment", default="")
+            kind = self._get_field(r, "type", default="LATERAL")
+            expr = self._get_field(r, "expression", default="")
+            if sub and expr:
+                file.write(f"{sub:<16} {kind:<8} {expr}\n")
+
+    def _write_loadings(self, model: Dict[str, Any], file: TextIO):
+        """Write [LOADINGS] section: initial buildup per subcatchment and pollutant."""
+        rows = model.get("loadings")
+        if not rows:
+            return
+        self._write_section_header(file, "LOADINGS")
+        file.write(";;Subcatchment   Pollutant        Buildup\n")
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            sub = self._get_field(r, "subcatchment", default="")
+            pol = self._get_field(r, "pollutant", default="")
+            val = self._get_field(r, "buildup", "init_buildup", default="")
+            if sub and pol and val != "":
+                file.write(f"{sub:<16} {pol:<16} {val}\n")
+
+    def _write_events(self, model: Dict[str, Any], file: TextIO):
+        """Write [EVENTS] section (SWMM 5.2): one routing period per row."""
+        events = model.get("events")
+        if not events:
+            return
+        self._write_section_header(file, "EVENTS")
+        file.write(";;Start Date  Start Time  End Date  End Time\n")
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            start = self._get_field(ev, "start", default="")
+            end = self._get_field(ev, "end", default="")
+            if start and end:
+                file.write(f"{start}  {end}\n")
+
     def _write_aquifers(self, model: Dict[str, Any], file: TextIO):
-        """Write [AQUIFERS] section."""
+        """Write [AQUIFERS] section.
+
+        Twelve numbers after the name plus the optional evaporation
+        pattern. Rows decoded by older versions carry the tail under
+        stale names (``hydcon``/``condslp``/... and ``upm_field`` for
+        Egw); those are read as fallbacks so an existing data.json still
+        renders.
+        """
         if "aquifers" not in model or not model["aquifers"]:
             return
         self._write_section_header(file, "AQUIFERS")
         file.write(
-            ";;Name           Por  WP  FC  HydCon  CondSlp  Tension"
-            "  UpEvap  LosRate  GwHt  WatTab  UpmField\n"
+            ";;Name           Por    WP     FC     Ksat   Kslope Tslope ETu    ETs"
+            "    Seep   Ebot   Egw    Umc    ETupat\n"
         )
         for aq in model["aquifers"]:
-            cols = [
-                self._get_field(aq, "name"),
-                self._get_field(aq, "por"),
-                self._get_field(aq, "wp"),
-                self._get_field(aq, "fc"),
-                self._get_field(aq, "hydcon"),
-                self._get_field(aq, "condslp"),
-                self._get_field(aq, "tension"),
-                self._get_field(aq, "upevap"),
-                self._get_field(aq, "losrate"),
-                self._get_field(aq, "gw_height"),
-                self._get_field(aq, "water_table"),
-            ]
-            line = " ".join(str(c) for c in cols)
-            upm = self._get_field(aq, "upm_field", default="")
-            if upm:
-                line += f" {upm}"
-            file.write(line + "\n")
+            cols = [self._get_field(aq, "name")]
+            for key, legacy in AQUIFER_COLUMNS:
+                val = self._get_field(aq, key, default="")
+                if val == "" and legacy:
+                    val = self._get_field(aq, legacy, default="")
+                cols.append("0" if val == "" else val)
+            epat = self._get_field(aq, "epat", default="")
+            if epat:
+                cols.append(epat)
+            file.write(" ".join(str(c) for c in cols) + "\n")
 
     def _write_snowpacks(self, model: Dict[str, Any], file: TextIO):
         """Write [SNOWPACKS] section.
@@ -1222,7 +1283,7 @@ class SwmmInputEncoder:
         if "buildup" in model and model["buildup"]:
             self._write_section_header(file, "BUILDUP")
             file.write(
-                ";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3\n"
+                ";;LandUse         Pollutant        Function  Coeff1   Coeff2   Coeff3   PerUnit\n"
             )
 
             for entry in model["buildup"]:
@@ -1232,10 +1293,11 @@ class SwmmInputEncoder:
                 coeff1 = self._get_field(entry, "coeff1", default="0")
                 coeff2 = self._get_field(entry, "coeff2", default="0")
                 coeff3 = self._get_field(entry, "coeff3", default="0")
+                per_unit = self._get_field(entry, "per_unit", default="AREA")
 
                 file.write(
                     f"{landuse:<16} {pollutant:<16} {function:<9} "
-                    f"{coeff1:<8} {coeff2:<8} {coeff3}\n"
+                    f"{coeff1:<8} {coeff2:<8} {coeff3:<8} {per_unit}\n"
                 )
 
     def _write_washoff(self, model: Dict[str, Any], file: TextIO):
@@ -1343,15 +1405,18 @@ class SwmmInputEncoder:
                     continue
                 row = [
                     f"{name:<16}",
-                    f"{resp.get('month', 'ALL'):<20}",
-                    f"{resp.get('response', 'SHORT'):<10}",
+                    f"{resp.get('month', 'ALL'):<16}",
+                    f"{resp.get('response', 'SHORT'):<8}",
                 ]
                 for key in ("r", "t", "k", "dmax", "drecov", "dinit"):
                     val = resp.get(key)
                     if val in (None, ""):
                         continue
                     row.append(f"{val:<8}")
-                file.write("".join(row).rstrip() + "\n")
+                # Joined with a space: a padded value that fills its
+                # column ("1.000000" is eight wide) must not run into
+                # the next one, or the engine reads one long number.
+                file.write(" ".join(row).rstrip() + "\n")
 
     def _write_rdii(self, model: Dict[str, Any], file: TextIO):
         """Write [RDII] section."""
