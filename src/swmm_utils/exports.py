@@ -1524,10 +1524,23 @@ def emit_results_zarr(
     zarr_store: Any,
     *,
     chunk_features: int = 10_000,
+    chunk_periods: Optional[int] = None,
+    target_chunk_bytes: int = 4 * 1024 * 1024,
     sort_spatial: bool = True,
 ) -> Dict[str, Any]:
     """
     Write SWMM simulation time-series to a Zarr store.
+
+    Chunking serves two readers. The map reads one period across every
+    feature (a frame to paint), so a chunk spans all features by default
+    (`chunk_features` 10_000) and only as many periods as fit
+    `target_chunk_bytes` uncompressed (4 MiB: ~46 periods of a 4,372-link
+    × 5-metric cube), so a frame is one small object. A series reader
+    (one feature, every period) fetches every period chunk of one
+    feature slab, which is the whole cube once and is cached server-side.
+    Before this the cube was one chunk per role, and either read pulled
+    all of it (93 MB for that cube). `chunk_periods` pins the period
+    chunk explicitly.
 
     Layout (one xarray Dataset; per-role arrays):
         nodes          shape (N, P, M_node)
@@ -1545,7 +1558,11 @@ def emit_results_zarr(
         out_path:        Path to SWMM binary .out.
         inp_path:        Path to source .inp (for spatial sort coordinates).
         zarr_store:      A zarr-store-compatible target.
-        chunk_features:  Feature-axis chunk size. Default 10_000.
+        chunk_features:  Feature-axis chunk size. Default 10_000 (all).
+        chunk_periods:   Period-axis chunk size; None sizes it from
+                         `target_chunk_bytes`.
+        target_chunk_bytes: Uncompressed bytes a chunk should stay under
+                         when `chunk_periods` is None. Default 4 MiB.
         sort_spatial:    If True, sort features by Z-order on coordinates.
 
     Returns:
@@ -1602,29 +1619,32 @@ def emit_results_zarr(
     }
     encoding: Dict[str, Dict[str, Any]] = {}
 
+    chunks_used: Dict[str, tuple] = {}
+
+    def _chunks(n_features: int, n_metrics: int) -> tuple:
+        f = min(chunk_features, max(1, n_features))
+        return (f, _period_chunk(f, n_periods, n_metrics, chunk_periods, target_chunk_bytes), n_metrics)
+
     if len(node_ids) > 0:
         data_vars["nodes"] = (("node_idx", "period_idx", "node_metric"), node_arr.astype("float32"))
         coords["node_feature_id"] = ("node_idx", np.array(node_ids, dtype=object))
         coords["node_metric"] = node_metrics
-        encoding["nodes"] = {"chunks": (
-            min(chunk_features, max(1, len(node_ids))), n_periods, len(node_metrics),
-        )}
+        chunks_used["nodes"] = _chunks(len(node_ids), len(node_metrics))
+        encoding["nodes"] = {"chunks": chunks_used["nodes"]}
     if len(link_ids) > 0:
         data_vars["links"] = (("link_idx", "period_idx", "link_metric"), link_arr.astype("float32"))
         coords["link_feature_id"] = ("link_idx", np.array(link_ids, dtype=object))
         coords["link_metric"] = link_metrics
-        encoding["links"] = {"chunks": (
-            min(chunk_features, max(1, len(link_ids))), n_periods, len(link_metrics),
-        )}
+        chunks_used["links"] = _chunks(len(link_ids), len(link_metrics))
+        encoding["links"] = {"chunks": chunks_used["links"]}
     if len(sub_ids) > 0:
         data_vars["subcatchments"] = (
             ("sub_idx", "period_idx", "sub_metric"), sub_arr.astype("float32"),
         )
         coords["sub_feature_id"] = ("sub_idx", np.array(sub_ids, dtype=object))
         coords["sub_metric"] = sub_metrics
-        encoding["subcatchments"] = {"chunks": (
-            min(chunk_features, max(1, len(sub_ids))), n_periods, len(sub_metrics),
-        )}
+        chunks_used["subcatchments"] = _chunks(len(sub_ids), len(sub_metrics))
+        encoding["subcatchments"] = {"chunks": chunks_used["subcatchments"]}
 
     ds = xr.Dataset(
         data_vars=data_vars,
@@ -1648,7 +1668,20 @@ def emit_results_zarr(
         "n_periods": n_periods,
         "report_time_step_seconds": step_seconds,
         "chunk_features": chunk_features,
+        "chunks": {k: list(v) for k, v in chunks_used.items()},
     }
+
+
+def _period_chunk(
+    n_features_chunk: int, n_periods: int, n_metrics: int,
+    chunk_periods: Optional[int], target_chunk_bytes: int,
+) -> int:
+    """Periods per chunk: as given, else as many as fit the byte target (float32)."""
+    periods = max(1, int(n_periods))
+    if chunk_periods is not None:
+        return max(1, min(int(chunk_periods), periods))
+    per_period = max(1, n_features_chunk * max(1, n_metrics) * 4)
+    return max(1, min(periods, int(target_chunk_bytes) // per_period))
 
 
 def _build_coords_lookup(coords_data: List[Dict[str, Any]]) -> Dict[str, tuple]:
