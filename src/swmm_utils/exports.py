@@ -1518,7 +1518,7 @@ def _coerce_parquet_types(df):
 # .out → results.zarr
 # ---------------------------------------------------------------------------
 
-def emit_results_zarr(
+def emit_results_zarr(  # pylint: disable=too-many-arguments
     out_path: PathLike,
     inp_path: PathLike,
     zarr_store: Any,
