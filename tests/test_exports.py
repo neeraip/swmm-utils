@@ -151,6 +151,31 @@ def test_emit_results_zarr_writes_and_reopens(tmp_path):
     assert any(name in ds.data_vars for name in ("nodes", "links", "subcatchments"))
 
 
+@pytest.mark.skipif(not _has_xarray_zarr(), reason="xarray + zarr not installed")
+def test_emit_results_zarr_chunks_by_period_for_the_map(tmp_path):
+    """A chunk spans every feature and as many periods as fit the byte target, so a map frame is one small object."""
+    from swmm_utils.exports import emit_results_zarr, _period_chunk
+    import zarr
+
+    store = tmp_path / "results.zarr"
+    desc = emit_results_zarr(OUT_EXAMPLE1, INP_EXAMPLE1, str(store), target_chunk_bytes=64 * 1024)
+    g = zarr.open_group(str(store), mode="r")
+    for role, chunks in desc["chunks"].items():
+        arr = g[role]
+        assert list(arr.chunks) == list(chunks)
+        assert chunks[0] == arr.shape[0]                      # every feature
+        assert chunks[1] * chunks[0] * chunks[2] * 4 <= 64 * 1024 or chunks[1] == 1
+        assert chunks[2] == arr.shape[2]                      # every metric
+
+    pinned = emit_results_zarr(OUT_EXAMPLE1, INP_EXAMPLE1, str(tmp_path / "pinned.zarr"), chunk_periods=1)
+    assert all(c[1] == 1 for c in pinned["chunks"].values())
+
+    # The sizing rule itself: 4,372 links × 5 metrics × 4 bytes is 87 KB a period, 46 of them under 4 MiB.
+    assert _period_chunk(4372, 1440, 5, None, 4 * 1024 * 1024) == 47
+    assert _period_chunk(10, 5, 3, None, 4 * 1024 * 1024) == 5            # never past the run
+    assert _period_chunk(10, 500, 3, 24, 4 * 1024 * 1024) == 24           # pinned
+
+
 # ---------------------------------------------------------------------------
 # emit_results_parquet
 # ---------------------------------------------------------------------------
