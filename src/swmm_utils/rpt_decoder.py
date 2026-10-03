@@ -241,9 +241,16 @@ class SwmmReportDecoder:
             match = re.match(
                 r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.><*-]+)\s+([\d.><*-]+)", line
             )
-            if match:
+            # The table's last line carries one number, not two:
+            # "Continuity Error (%) .....         0.123". It is the figure a
+            # reader checks a run by, so it is kept as a one-element list.
+            single = None if match else re.match(
+                r"([A-Za-z\s()%]+?)\s*\.+\s+([\d.><*-]+)\s*$", line
+            )
+            if match or single:
+                m = match or single
                 key = (
-                    match.group(1)
+                    m.group(1)
                     .strip()
                     .lower()
                     .replace(" ", "_")
@@ -252,7 +259,11 @@ class SwmmReportDecoder:
                     .replace("%", "percent")
                 )
                 try:
-                    values = [_safe_float(match.group(2)), _safe_float(match.group(3))]
+                    values = (
+                        [_safe_float(m.group(2)), _safe_float(m.group(3))]
+                        if match
+                        else [_safe_float(m.group(2))]
+                    )
                     data[key] = values
                 except ValueError:
                     continue

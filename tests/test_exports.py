@@ -108,6 +108,17 @@ def test_emit_report_json_shape():
     assert "node" in metrics and "link" in metrics and "subcatchment" in metrics
 
 
+@pytest.mark.skipif(not RPT_EXAMPLE1.exists(), reason="example1.rpt not found")
+def test_emit_report_json_carries_the_continuity_error():
+    # The one-number line at the foot of each continuity table: the figure a
+    # run is sanity-checked by. Console's Compare reads it from ``balances``.
+    r = emit_report_json(RPT_EXAMPLE1)
+    assert r["continuity"]["flow_routing"]["continuity_error_percent"] == [0.123]
+    assert r["balances"]["flow_routing.continuity_error_percent"] == "0.123"
+    # The two-column rows are untouched.
+    assert len(r["continuity"]["flow_routing"]["final_stored_volume"]) == 2
+
+
 @pytest.mark.skipif(
     not (RPT_EXAMPLE1.exists() and OUT_EXAMPLE1.exists()),
     reason="example1.rpt or example1.out not found",
