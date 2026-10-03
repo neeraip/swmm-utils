@@ -694,3 +694,22 @@ FLOW_UNITS    CFS
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_files_section_keeps_every_use_and_save_line():
+    """``USE HOTSTART`` beside ``USE RAINFALL``: keyed on verb and type, both stay."""
+    import io
+
+    from swmm_utils.inp_decoder import SwmmInputDecoder
+
+    text = """[FILES]
+USE HOTSTART "/home/jovyan/work/Hotstart/87S-100.hsf"
+USE RAINFALL rain.dat
+SAVE OUTFLOWS "out.txt"
+"""
+    model = SwmmInputDecoder().decode(io.StringIO(text))
+    assert model["files"] == {
+        "USE HOTSTART": '"/home/jovyan/work/Hotstart/87S-100.hsf"',
+        "USE RAINFALL": "rain.dat",
+        "SAVE OUTFLOWS": '"out.txt"',
+    }
