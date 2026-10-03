@@ -1291,13 +1291,20 @@ class SwmmInputDecoder:
         model["lid_usage"] = lid_usage
 
     def _parse_files(self, model: dict, data: List[str]):
-        """Parse [FILES] section."""
+        """Parse [FILES] section.
+
+        Each line is ``USE|SAVE <TYPE> <path>`` — ``USE HOTSTART "warm.hsf"``,
+        ``SAVE OUTFLOWS out.txt``. The key is the verb and the type together:
+        keyed on the verb alone, a model that both uses a hotstart and uses
+        a rainfall file kept only one of them.
+        """
         files = {}
         for line in data:
-            parts = line.split(None, 1)
-            if len(parts) == 2:
-                key, value = parts
-                files[key] = value
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[0].upper() in ("USE", "SAVE"):
+                files[f"{parts[0].upper()} {parts[1].upper()}"] = parts[2]
+            elif len(parts) >= 2:
+                files[parts[0]] = line.split(None, 1)[1]
         model["files"] = files
 
     def _parse_hydrographs(self, model: dict, data: List[str]):
