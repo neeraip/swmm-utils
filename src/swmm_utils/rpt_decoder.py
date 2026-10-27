@@ -104,32 +104,48 @@ class SwmmReportDecoder:
 
         return report_data
 
+    # The first line of a report: SWMM 5 writes "EPA STORM WATER MANAGEMENT
+    # MODEL - VERSION 5.2 (Build 5.2.4)", OpenSWMM "OPENSWMM ENGINE - VERSION
+    # 6.0.0-alpha.3" (its bundled 5.3 engine adds "(Build 5.3.0)").
+    _BANNERS = (
+        ("EPA SWMM", "EPA STORM WATER MANAGEMENT MODEL - VERSION"),
+        ("OpenSWMM", "OPENSWMM ENGINE - VERSION"),
+    )
+
     def _parse_header(self, content: str) -> Dict[str, str]:
-        """Parse the report header."""
-        header = {}
+        """Parse the report header: engine, version, build and title.
 
-        # Extract version
-        version_match = re.search(
-            r"EPA STORM WATER MANAGEMENT MODEL - VERSION ([\d.]+)", content
-        )
-        if version_match:
-            header["version"] = version_match.group(1)
-
-        # Extract build
-        build_match = re.search(r"Build ([\d.]+)", content)
-        if build_match:
-            header["build"] = build_match.group(1)
-
-        # Extract title (first few lines after header)
+        Keys are left out when the report doesn't give them: OpenSWMM 6
+        prints no build, and a model without a title has none.
+        """
+        header: Dict[str, str] = {}
         lines = content.split("\n")
+
         for i, line in enumerate(lines):
-            if "EPA STORM WATER MANAGEMENT MODEL" in line:
-                # Next non-empty line should be the title
-                for j in range(i + 3, min(i + 10, len(lines))):
-                    if lines[j].strip() and not lines[j].strip().startswith("*"):
-                        header["title"] = lines[j].strip()
-                        break
+            for engine, banner in self._BANNERS:
+                match = re.search(re.escape(banner) + r"\s+([\w.\-]+)", line)
+                if match:
+                    break
+            else:
+                continue
+
+            header["engine"] = engine
+            header["version"] = match.group(1)
+            build_match = re.search(r"\(Build ([\w.\-]+)\)", line)
+            if build_match:
+                header["build"] = build_match.group(1)
+
+            # The title is the first line after the banner's underline.
+            # OpenSWMM also prints the [TITLE] section's ";;" comment lines.
+            # A section banner (stars) or a warning first means no title.
+            for title_line in lines[i + 1:i + 10]:
+                text = title_line.strip()
+                if not text or set(text) == {"-"} or text.startswith(";;"):
+                    continue
+                if not text.startswith(("*", "WARNING", "ERROR")):
+                    header["title"] = text
                 break
+            break
 
         return header
 
@@ -704,11 +720,17 @@ class SwmmReportDecoder:
         return storages
 
     def _parse_node_surcharge(self, content: str) -> List[Dict[str, Any]]:
-        """Parse node surcharge summary section."""
+        """Parse node surcharge summary section.
+
+        The section ends at the next section's banner. Matching on to the
+        first dashed line after the heading used to run into the next table
+        when the report said "No nodes were surcharged", and its rows were
+        read as surcharge rows.
+        """
         nodes = []
 
         section_match = re.search(
-            r"Node Surcharge Summary\s*\*+.+?-+\s*(.+?)(?=\n\s*\n\s*\*+|\Z)",
+            r"Node Surcharge Summary\s*\*+(.+?)(?=\n\s*\n\s*\*+|\Z)",
             content,
             re.DOTALL,
         )
@@ -716,19 +738,17 @@ class SwmmReportDecoder:
         if not section_match:
             return nodes
 
-        section_text = section_match.group(1).strip()
-        lines = section_text.split("\n")
+        section_text = section_match.group(1)
+        if "No nodes were surcharged" in section_text:
+            return nodes
 
-        for line in lines:
-            line = line.strip()
-            if (
-                not line
-                or line.startswith("-")
-                or "Node" in line
-                or "Surcharging occurs" in line
-            ):
-                continue
+        # Rows follow the dashed line under the column headings.
+        lines = section_text.strip().split("\n")
+        dashed = [i for i, line in enumerate(lines) if line.strip().startswith("---")]
+        if not dashed:
+            return nodes
 
+        for line in lines[dashed[-1] + 1:]:
             parts = line.split()
             if len(parts) >= 5:
                 try:
