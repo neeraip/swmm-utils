@@ -139,6 +139,7 @@ class SwmmInputEncoder:
         self._write_report(model, file)
         self._write_map(model, file)
         self._write_backdrop(model, file)
+        self._write_unknown_sections(model, file)
 
     def encode_to_json(
         self, model: Dict[str, Any], filepath: str, pretty: bool = False
@@ -350,6 +351,14 @@ class SwmmInputEncoder:
                 if value is not None:
                     return value
         return default
+
+    @staticmethod
+    def _extra(row: Dict[str, Any]) -> str:
+        """Columns after a row's last known one, as the decoder kept them."""
+        extra = row.get("extra")
+        if not extra:
+            return ""
+        return " " + " ".join(str(token) for token in extra)
 
     @staticmethod
     def _maybe_write_description(file: TextIO, row: Dict[str, Any]) -> None:
@@ -567,12 +576,38 @@ class SwmmInputEncoder:
                 source = self._get_field(gage, "source", default="TIMESERIES")
                 file_or_station = self._get_field(
                     gage, "file_or_station", "fileOrStation", default=""
-                )
+                ) or self._raingage_source_params(gage, source)
 
                 file.write(
                     f"{name:<16} {format_type:<9} {interval:<8} "
                     f"{scf:<8} {source:<9} {file_or_station}\n"
                 )
+
+    @staticmethod
+    def _raingage_source_params(gage: Dict[str, Any], source: str) -> str:
+        """Build a gage's columns after the source from its separate fields.
+
+        Used when a gage has no ``file_or_station`` (a dict built by hand
+        rather than decoded). A scale factor after a FILE source needs a
+        start date before it, so ``*`` (from the start of the file) is
+        written when ``start`` is missing.
+        """
+        data_param = str(gage.get("data_param") or "")
+        scale_factor = gage.get("scale_factor")
+        if str(source).upper() == "FILE":
+            if not data_param:
+                return ""
+            cols = [f'"{data_param}"', str(gage.get("station") or "*"),
+                    str(gage.get("units") or "IN")]
+            start = gage.get("start")
+            if start or scale_factor:
+                cols.append(str(start or "*"))
+            if scale_factor:
+                cols.append(str(scale_factor))
+            return " ".join(cols)
+        if data_param and scale_factor:
+            return f"{data_param} {scale_factor}"
+        return data_param
 
     def _write_subcatchments(self, model: Dict[str, Any], file: TextIO):
         """Write [SUBCATCHMENTS] section."""
@@ -600,7 +635,7 @@ class SwmmInputEncoder:
                 file.write(
                     f"{name:<16} {raingage:<16} {outlet:<16} "
                     f"{area:<8} {imperv:<8} {width:<8} "
-                    f"{slope:<8} {curb_length:<8} {snowpack}\n"
+                    f"{slope:<8} {curb_length:<8} {snowpack}{self._extra(sub)}\n"
                 )
 
     def _write_subareas(self, model: Dict[str, Any], file: TextIO):
@@ -624,7 +659,7 @@ class SwmmInputEncoder:
                 file.write(
                     f"{subcatchment:<16} {n_imperv:<10} {n_perv:<10} "
                     f"{s_imperv:<10} {s_perv:<10} {pct_zero:<10} "
-                    f"{route_to:<10} {pct_routed}\n"
+                    f"{route_to:<10} {pct_routed}{self._extra(sub)}\n"
                 )
 
     def _write_infiltration(self, model: Dict[str, Any], file: TextIO):
@@ -657,7 +692,7 @@ class SwmmInputEncoder:
 
                 file.write(
                     f"{subcatchment:<16} {param1:<10} {param2:<10} "
-                    f"{param3:<10} {param4:<10} {param5}\n"
+                    f"{param3:<10} {param4:<10} {param5}{self._extra(infil)}\n"
                 )
 
     def _write_junctions(self, model: Dict[str, Any], file: TextIO):
@@ -685,7 +720,8 @@ class SwmmInputEncoder:
                 self._maybe_write_description(file, junc)
                 file.write(
                     f"{name:<16} {elevation:<10} {max_depth:<10} "
-                    f"{init_depth:<10} {surcharge_depth:<10} {ponded_area}\n"
+                    f"{init_depth:<10} {surcharge_depth:<10} {ponded_area}"
+                    f"{self._extra(junc)}\n"
                 )
 
     def _write_outfalls(self, model: Dict[str, Any], file: TextIO):
@@ -709,7 +745,7 @@ class SwmmInputEncoder:
                 self._maybe_write_description(file, outfall)
                 file.write(
                     f"{name:<16} {elevation:<10} {outfall_type:<10} "
-                    f"{stage_data:<16} {gated:<8} {route_to}\n"
+                    f"{stage_data:<16} {gated:<8} {route_to}{self._extra(outfall)}\n"
                 )
 
     def _write_storage(self, model: Dict[str, Any], file: TextIO):
@@ -773,6 +809,7 @@ class SwmmInputEncoder:
                 v = self._get_field(d, key, default="")
                 if v != "":
                     cols.append(str(v))
+            cols.extend(str(token) for token in d.get("extra") or [])
             file.write(" ".join(str(c) for c in cols) + "\n")
 
     def _write_conduits(self, model: Dict[str, Any], file: TextIO):
@@ -800,7 +837,7 @@ class SwmmInputEncoder:
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{length:<10} {roughness:<10} {in_offset:<10} "
-                    f"{out_offset:<10} {init_flow:<10} {max_flow}\n"
+                    f"{out_offset:<10} {init_flow:<10} {max_flow}{self._extra(conduit)}\n"
                 )
 
     def _write_pumps(self, model: Dict[str, Any], file: TextIO):
@@ -823,7 +860,7 @@ class SwmmInputEncoder:
                 self._maybe_write_description(file, pump)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
-                    f"{curve:<16} {status:<8} {startup:<6} {shutoff}\n"
+                    f"{curve:<16} {status:<8} {startup:<6} {shutoff}{self._extra(pump)}\n"
                 )
 
     def _write_orifices(self, model: Dict[str, Any], file: TextIO):
@@ -852,7 +889,7 @@ class SwmmInputEncoder:
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{orifice_type:<12} {offset:<10} {discharge_coeff:<10} "
-                    f"{gated:<8} {close_time}\n"
+                    f"{gated:<8} {close_time}{self._extra(orifice)}\n"
                 )
 
     def _write_weirs(self, model: Dict[str, Any], file: TextIO):
@@ -887,7 +924,8 @@ class SwmmInputEncoder:
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{weir_type:<12} {crest_height:<10} {discharge_coeff:<10} "
-                    f"{gated:<8} {end_con:<8} {end_coeff:<10} {surcharge:<10} {road_width:<10} {road_surf}\n"
+                    f"{gated:<8} {end_con:<8} {end_coeff:<10} {surcharge:<10} {road_width:<10} {road_surf}"
+                    f"{self._extra(weir)}\n"
                 )
 
     def _write_xsections(self, model: Dict[str, Any], file: TextIO):
@@ -910,7 +948,7 @@ class SwmmInputEncoder:
 
                 file.write(
                     f"{link:<16} {shape:<12} {geom1:<16} "
-                    f"{geom2:<10} {geom3:<10} {geom4:<10} {barrels:<10} {culvert}\n"
+                    f"{geom2:<10} {geom3:<10} {geom4:<10} {barrels:<10} {culvert}{self._extra(xs)}\n"
                 )
 
     def _write_losses(self, model: Dict[str, Any], file: TextIO):
@@ -931,7 +969,7 @@ class SwmmInputEncoder:
 
                 file.write(
                     f"{link:<16} {inlet:<10} {outlet:<10} "
-                    f"{average:<10} {flap_gate:<10} {seepage}\n"
+                    f"{average:<10} {flap_gate:<10} {seepage}{self._extra(loss)}\n"
                 )
 
     def _write_controls(self, model: Dict[str, Any], file: TextIO):
@@ -1152,7 +1190,7 @@ class SwmmInputEncoder:
                 self._maybe_write_description(file, outlet)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
-                    f"{offset:<10} {outlet_type:<12} {params} {gated}\n"
+                    f"{offset:<10} {outlet_type:<12} {params} {gated}{self._extra(outlet)}\n"
                 )
 
     def _write_transects(self, model: Dict[str, Any], file: TextIO):
@@ -1186,6 +1224,17 @@ class SwmmInputEncoder:
             for key, value in model["backdrop"].items():
                 file.write(f"{key:<20} {value}\n")
 
+    def _write_unknown_sections(self, model: Dict[str, Any], file: TextIO):
+        """Write sections the decoder kept verbatim, in the order read.
+
+        They go last. OpenSWMM's own 2D example gives the same results with
+        its ``[2D_*]`` sections moved there from before ``[COORDINATES]``.
+        """
+        for name, lines in (model.get("unknown_sections") or {}).items():
+            file.write(f"\n[{name}]\n")
+            for line in lines:
+                file.write(f"{line}\n")
+
     def _write_profiles(self, model: Dict[str, Any], file: TextIO):
         """Write [PROFILES] section."""
         if "profiles" in model and model["profiles"]:
@@ -1217,7 +1266,7 @@ class SwmmInputEncoder:
 
                 file.write(
                     f"{node:<16} {constituent:<16} {timeseries:<16} "
-                    f"{inflow_type:<8} {mfactor:<8} {sfactor:<8} {baseline:<8} {pattern}".rstrip() + "\n"
+                    f"{inflow_type:<8} {mfactor:<8} {sfactor:<8} {baseline:<8} {pattern}{self._extra(inflow)}".rstrip() + "\n"
                 )
 
     def _write_dwf(self, model: Dict[str, Any], file: TextIO):

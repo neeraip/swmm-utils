@@ -33,15 +33,19 @@ Report files follow a consistent structure with:
 
 **Example**:
 ```
-EPA STORM WATER MANAGEMENT MODEL - VERSION 5.2
-Build 5.2.4
+  EPA STORM WATER MANAGEMENT MODEL - VERSION 5.2 (Build 5.2.4)
+  ------------------------------------------------------------
+
+  Project title
 ```
 
-**Includes**:
-- SWMM Version number
-- Build number
-- Project title (from `.inp` file `[TITLE]` section)
-- Report generation date/time
+OpenSWMM writes `OPENSWMM ENGINE - VERSION 6.0.0-alpha.3` (no build), or
+`OPENSWMM ENGINE - VERSION 5.3.0 (Build 5.3.0)` from the 5.3 engine it bundles, and prints the
+`[TITLE]` section's `;;` comment lines before the title.
+
+**Decoded as** `header`: `engine` (`EPA SWMM` or `OpenSWMM`), `version`, `build` and `title`
+(the first line of the title). A key is left out when the report doesn't give it: OpenSWMM 6 has
+no build, and a model without a title has none.
 
 ---
 
@@ -273,6 +277,10 @@ Continuity Error .................... 0.04%
 - Which nodes exceed their maximum capacity
 - Duration and extent of surcharge
 - Maximum surcharge depth above crown elevation
+
+**Decoded as** `node_surcharge`: a list of `node_name`, `node_type`, `hours_surcharged`,
+`max_height_above_crown`, `min_depth_below_rim`; empty when the report says "No nodes were
+surcharged."
 
 ---
 
