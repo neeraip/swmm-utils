@@ -156,8 +156,17 @@ DRY_ONLY         NO
 4. **SCF**: Snow catch deficiency correction factor (default 1.0)
 5. **Source**: TIMESERIES, FILE
 6. **Source Parameters**: 
-   - For TIMESERIES: Timeseries name
-   - For FILE: Filename  StationID  RainUnits
+   - For TIMESERIES: `Series  [ScaleFactor]`
+   - For FILE: `Filename  StationID  RainUnits  [Start]  [ScaleFactor]`
+
+`Start` is the date the file is read from (`*` for its first record). `ScaleFactor` multiplies
+the gage's rainfall; OpenSWMM 6 (and the 5.3 engine it bundles) applies it, EPA SWMM 5.2.4
+ignores it. 5.2.4 does read `Start`.
+
+**Decoded as**: `name`, `format`, `interval`, `scf`, `source`, `file_or_station` (everything after
+the source, as written, which is what the encoder writes back), and from it `data_param` (series
+or file name, quotes removed), `station`, `units`, `start` and `scale_factor` when present. A gage
+without `file_or_station` is written from those fields.
 
 **Example**:
 ```
@@ -166,6 +175,7 @@ DRY_ONLY         NO
 ;;-------------- --------- -------- -------- ----------
 RG1              INTENSITY 1:00     1.0      TIMESERIES TS_RAIN_1
 RG2              VOLUME    0:15     1.0      FILE "rainfall.dat" RG2 IN
+RG3              VOLUME    0:01     1.0      FILE "rainfall.dat" RG3 MM * 1.2
 ```
 
 ---

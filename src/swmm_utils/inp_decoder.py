@@ -526,23 +526,26 @@ class SwmmInputDecoder:
     def _parse_raingages(self, model: dict, data: List[str]):
         """Parse [RAINGAGES] section.
 
-        SWMM 5.2 column layout is source-dependent. The trailing
-        portion of the row encodes:
+        The trailing portion of the row depends on the source:
 
-          ... TIMESERIES <series_name>
-          ... FILE       <"filename"> <station_id> <units>
+          ... TIMESERIES <series> [SCF]
+          ... FILE <"filename"> <station> <units> [Start] [SCF]
 
-        For FILE source we additionally surface ``station`` and
-        ``units`` as their own columns (and strip surrounding quotes
-        from the filename) so the bottom data table and side panel
-        can render rain units instead of one squashed string. The
-        legacy ``file_or_station`` field is kept as the joined
-        trailing string so existing encoders / tests round-trip
-        unchanged.
+        ``file_or_station`` keeps everything after the source as written,
+        and the encoder writes it back, so a row round-trips whatever its
+        columns. The parts are also surfaced on their own: ``data_param``
+        (the series or file name, quotes stripped), ``station``, ``units``,
+        ``start`` (the date the file's data is read from; ``*`` means from
+        the start of the file) and ``scale_factor`` (a multiplier on the
+        gage's rainfall).
+
+        EPA SWMM 5.2.4 reads ``start`` but not ``scale_factor``; OpenSWMM 6
+        (and the 5.3 engine it bundles) applies both.
         """
         raingages = []
         for line in data:
-            parts = line.split()
+            # A quoted file name may contain spaces.
+            parts = re.findall(r'"[^"]*"|\S+', line)
             if len(parts) < 6:
                 continue
             gage = {
@@ -555,18 +558,17 @@ class SwmmInputDecoder:
             }
             source_upper = parts[4].upper()
             if source_upper == "FILE" and len(parts) >= 8:
-                # Strip surrounding double-quotes from the filename
-                # token; SWMM allows quoted paths when they contain
-                # spaces, but at this point the tokenizer already
-                # split on whitespace so a path with spaces would
-                # already be broken — we only handle the simple
-                # quoted case.
-                file_name = parts[5].strip('"')
-                gage["data_param"] = file_name
+                gage["data_param"] = parts[5].strip('"')
                 gage["station"] = parts[6]
                 gage["units"] = parts[7]
+                if len(parts) > 8:
+                    gage["start"] = parts[8]
+                if len(parts) > 9:
+                    gage["scale_factor"] = parts[9]
             elif source_upper == "TIMESERIES":
                 gage["data_param"] = parts[5]
+                if len(parts) > 6:
+                    gage["scale_factor"] = parts[6]
             raingages.append(gage)
         model["raingages"] = raingages
 

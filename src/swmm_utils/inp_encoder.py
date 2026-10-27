@@ -576,12 +576,38 @@ class SwmmInputEncoder:
                 source = self._get_field(gage, "source", default="TIMESERIES")
                 file_or_station = self._get_field(
                     gage, "file_or_station", "fileOrStation", default=""
-                )
+                ) or self._raingage_source_params(gage, source)
 
                 file.write(
                     f"{name:<16} {format_type:<9} {interval:<8} "
                     f"{scf:<8} {source:<9} {file_or_station}\n"
                 )
+
+    @staticmethod
+    def _raingage_source_params(gage: Dict[str, Any], source: str) -> str:
+        """Build a gage's columns after the source from its separate fields.
+
+        Used when a gage has no ``file_or_station`` (a dict built by hand
+        rather than decoded). A scale factor after a FILE source needs a
+        start date before it, so ``*`` (from the start of the file) is
+        written when ``start`` is missing.
+        """
+        data_param = str(gage.get("data_param") or "")
+        scale_factor = gage.get("scale_factor")
+        if str(source).upper() == "FILE":
+            if not data_param:
+                return ""
+            cols = [f'"{data_param}"', str(gage.get("station") or "*"),
+                    str(gage.get("units") or "IN")]
+            start = gage.get("start")
+            if start or scale_factor:
+                cols.append(str(start or "*"))
+            if scale_factor:
+                cols.append(str(scale_factor))
+            return " ".join(cols)
+        if data_param and scale_factor:
+            return f"{data_param} {scale_factor}"
+        return data_param
 
     def _write_subcatchments(self, model: Dict[str, Any], file: TextIO):
         """Write [SUBCATCHMENTS] section."""
