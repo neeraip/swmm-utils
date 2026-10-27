@@ -1670,6 +1670,23 @@ SWMM reads sections in any order, but processes them in a specific sequence duri
 5. **Circular references**: Subcatchment outlets to each other
 6. **Unit inconsistency**: Mixing US/SI units
 
+### What the decoder doesn't know
+
+Content without a field of its own is kept and written back as read, so a decode → encode round
+trip doesn't lose it:
+
+- **Sections with no handler** (OpenSWMM's `[2D_OPTIONS]`, `[2D_MESH_FILE]`, `[2D_VERTICES]` and
+  the other `[2D_*]` sections, `[PLUGINS]`, `[USER_FLAGS]`) go under `unknown_sections`,
+  `{"2D_OPTIONS": ["line", ...]}`, each line as written, comments included. The encoder writes
+  them after the known sections, in the order they were read. EPA SWMM 5.2.4 refuses these
+  sections (ERROR 205), so an input meant for it has to leave them out.
+- **`[OPTIONS]` keys** are all kept in order, whether SWMM 5 knows them or not (OpenSWMM's
+  `NODE_CONTINUITY`, `ANDERSON_ACCEL`, `CRS`, `FV_*`, `DPS_*`). 5.2.4 refuses those too.
+- **Columns after a row's last known one** go under the row's `extra` (a list of strings) and are
+  written after the known columns. This covers [SUBCATCHMENTS] (OpenSWMM's rain and snow scale
+  factors after the snow pack), [SUBAREAS], [INFILTRATION], [JUNCTIONS], [OUTFALLS], [DIVIDERS],
+  [CONDUITS], [PUMPS], [ORIFICES], [WEIRS], [OUTLETS], [XSECTIONS], [LOSSES] and [INFLOWS].
+
 ### Version Compatibility
 - **SWMM 5.0+**: Most modern features
 - **SWMM 5.1+**: LID controls, improved hydraulics, enhanced reporting

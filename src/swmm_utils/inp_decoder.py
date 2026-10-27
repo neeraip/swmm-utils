@@ -13,6 +13,17 @@ AQUIFER_FIELDS = (
 )
 
 
+def _keep_extra(entry: Dict[str, Any], parts: List[str], used: int) -> None:
+    """Keep the tokens after a row's last known column under ``extra``.
+
+    Engines add columns (OpenSWMM's rain and snow scale factors after a
+    subcatchment's snow pack, for one); the encoder writes ``extra`` back
+    after the known columns, so the row survives a round trip as read.
+    """
+    if len(parts) > used:
+        entry["extra"] = parts[used:]
+
+
 class SwmmInputDecoder:
     """Decode SWMM input (.inp) files into Python dict structures."""
 
@@ -167,11 +178,17 @@ class SwmmInputDecoder:
         self.line_number = 0
         section_data: List[str] = []
         section_desc: List[str] = []
+        section_raw: List[str] = []
         pending_desc: List[str] = []
 
         for raw in file:
             self.line_number += 1
             stripped_full = raw.strip()
+
+            # A section this decoder has no handler for keeps its lines as
+            # written, comments included, so encoding writes it back whole.
+            if not re.match(r"^\[[A-Za-z0-9_]+\]$", stripped_full):
+                section_raw.append(raw.rstrip("\r\n"))
 
             # Blank line → clears pending description (so a description
             # block doesn't bleed across element rows separated by spacing).
@@ -191,16 +208,18 @@ class SwmmInputDecoder:
             # Section header. Real .inp files in the wild mix case
             # ([POLYGONS] vs [Polygons] vs [polygons]) — the SWMM engine
             # accepts any, so we do too. Normalize to UPPERCASE so the
-            # dispatch table stays simple.
-            section_match = re.match(r"^\[([A-Za-z_]+)\]$", stripped_full)
+            # dispatch table stays simple. Names may start with a digit
+            # (OpenSWMM's [2D_OPTIONS], [2D_VERTICES], ...).
+            section_match = re.match(r"^\[([A-Za-z0-9_]+)\]$", stripped_full)
             if section_match:
-                if self.current_section and section_data:
-                    self._process_section(
-                        model, self.current_section, section_data, section_desc
+                if self.current_section:
+                    self._close_section(
+                        model, section_data, section_desc, section_raw
                     )
                 self.current_section = section_match.group(1).upper()
                 section_data = []
                 section_desc = []
+                section_raw = []
                 pending_desc = []
                 continue
 
@@ -223,12 +242,37 @@ class SwmmInputDecoder:
                 section_data.append(data_part)
                 section_desc.append(desc)
 
-        if self.current_section and section_data:
-            self._process_section(
-                model, self.current_section, section_data, section_desc
-            )
+        if self.current_section:
+            self._close_section(model, section_data, section_desc, section_raw)
 
         return model
+
+    def _close_section(
+        self,
+        model: dict,
+        data: List[str],
+        descriptions: List[str],
+        raw_lines: List[str],
+    ):
+        """Hand a finished section to its handler, or keep it verbatim.
+
+        A section with no handler (OpenSWMM's ``[2D_*]``, ``[PLUGINS]``,
+        ``[USER_FLAGS]``, ...) is stored under ``unknown_sections`` as
+        ``{name: [line, ...]}``, its lines as written with the blank lines
+        at either end trimmed; the encoder writes it back unchanged.
+        """
+        section = self.current_section
+        if getattr(self, f"_parse_{section.lower()}", None) is None:
+            while raw_lines and not raw_lines[-1].strip():
+                raw_lines.pop()
+            while raw_lines and not raw_lines[0].strip():
+                raw_lines.pop(0)
+            if raw_lines:
+                unknown = model.setdefault("unknown_sections", {})
+                unknown.setdefault(section, []).extend(raw_lines)
+            return
+        if data:
+            self._process_section(model, section, data, descriptions)
 
     def _preprocess_line(self, line: str) -> str:
         """Preprocess a line by removing comments and whitespace.
@@ -307,9 +351,10 @@ class SwmmInputDecoder:
         options = {}
         for line in data:
             parts = line.split(None, 1)
-            if len(parts) == 2:
-                key, value = parts
-                options[key] = value
+            if parts:
+                # Every key is kept, the engine's or not (OpenSWMM's
+                # NODE_CONTINUITY, FV_*, CRS, ...), in the order written.
+                options[parts[0]] = parts[1] if len(parts) == 2 else ""
         model["options"] = options
 
     def _parse_evaporation(self, model: dict, data: List[str]):
@@ -543,6 +588,7 @@ class SwmmInputDecoder:
                 }
                 if len(parts) > 8:
                     sub["snowpack"] = parts[8]
+                _keep_extra(sub, parts, 9)
                 subcatchments.append(sub)
         model["subcatchments"] = subcatchments
 
@@ -563,6 +609,7 @@ class SwmmInputDecoder:
                 }
                 if len(parts) > 7:
                     subarea["pct_routed"] = parts[7]
+                _keep_extra(subarea, parts, 8)
                 subareas.append(subarea)
         model["subareas"] = subareas
 
@@ -582,6 +629,7 @@ class SwmmInputDecoder:
                     infil["param4"] = parts[4]
                 if len(parts) > 5:
                     infil["param5"] = parts[5]
+                _keep_extra(infil, parts, 6)
                 infiltrations.append(infil)
         model["infiltrations"] = infiltrations
 
@@ -602,6 +650,7 @@ class SwmmInputDecoder:
                     junction["surcharge_depth"] = parts[4]
                 if len(parts) > 5:
                     junction["ponded_area"] = parts[5]
+                _keep_extra(junction, parts, 6)
                 junctions.append(junction)
         model["junctions"] = junctions
 
@@ -633,12 +682,14 @@ class SwmmInputDecoder:
                     outfall["gated"] = parts[4]
                 if len(parts) > 5:
                     outfall["route_to"] = parts[5]
+                _keep_extra(outfall, parts, 6)
             else:
                 # FREE / NORMAL / unknown — no stage_data column.
                 if len(parts) > 3:
                     outfall["gated"] = parts[3]
                 if len(parts) > 4:
                     outfall["route_to"] = parts[4]
+                _keep_extra(outfall, parts, 5)
             outfalls.append(outfall)
         model["outfalls"] = outfalls
 
@@ -702,6 +753,7 @@ class SwmmInputDecoder:
             for i, key in enumerate(tail_keys):
                 if i < len(tail):
                     entry[key] = tail[i]
+            _keep_extra(entry, parts, args_end + len(tail_keys))
             dividers.append(entry)
         model["dividers"] = dividers
 
@@ -725,6 +777,7 @@ class SwmmInputDecoder:
                     conduit["init_flow"] = parts[7]
                 if len(parts) > 8:
                     conduit["max_flow"] = parts[8]
+                _keep_extra(conduit, parts, 9)
                 conduits.append(conduit)
         model["conduits"] = conduits
 
@@ -746,6 +799,7 @@ class SwmmInputDecoder:
                     pump["startup"] = parts[5]
                 if len(parts) > 6:
                     pump["shutoff"] = parts[6]
+                _keep_extra(pump, parts, 7)
                 pumps.append(pump)
         model["pumps"] = pumps
 
@@ -767,6 +821,7 @@ class SwmmInputDecoder:
                     orifice["gated"] = parts[6]
                 if len(parts) > 7:
                     orifice["close_time"] = parts[7]
+                _keep_extra(orifice, parts, 8)
                 orifices.append(orifice)
         model["orifices"] = orifices
 
@@ -796,6 +851,7 @@ class SwmmInputDecoder:
                     weir["road_width"] = parts[10]
                 if len(parts) > 11:
                     weir["road_surf"] = parts[11]
+                _keep_extra(weir, parts, 12)
                 weirs.append(weir)
         model["weirs"] = weirs
 
@@ -816,6 +872,7 @@ class SwmmInputDecoder:
                     xsection["barrels"] = parts[6]
                 if len(parts) > 7:
                     xsection["culvert"] = parts[7]
+                _keep_extra(xsection, parts, 8)
                 xsections.append(xsection)
         model["xsections"] = xsections
 
@@ -835,6 +892,7 @@ class SwmmInputDecoder:
                     loss["flap_gate"] = parts[4]
                 if len(parts) > 5:
                     loss["seepage"] = parts[5]
+                _keep_extra(loss, parts, 6)
                 losses.append(loss)
         model["losses"] = losses
 
@@ -1039,11 +1097,13 @@ class SwmmInputDecoder:
                         outlet["qexpon"] = parts[6]
                     if len(parts) > 7:
                         outlet["gated"] = parts[7]
+                    _keep_extra(outlet, parts, 8)
                 else:
                     if len(parts) > 5:
                         outlet["curve_name"] = parts[5]
                     if len(parts) > 6:
                         outlet["gated"] = parts[6]
+                    _keep_extra(outlet, parts, 7)
                 outlets.append(outlet)
         model["outlets"] = outlets
 
@@ -1116,6 +1176,7 @@ class SwmmInputDecoder:
                     inflow["baseline"] = parts[6]
                 if len(parts) > 7:
                     inflow["pattern"] = parts[7]
+                _keep_extra(inflow, parts, 8)
                 inflows.append(inflow)
         model["inflows"] = inflows
 
