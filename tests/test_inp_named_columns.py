@@ -13,6 +13,8 @@ SWMM 5.2 columns that 1.6 kept only as unnamed tokens, or lost:
 import io
 from pathlib import Path
 
+import pytest
+
 from swmm_utils import SwmmInputDecoder, SwmmInputEncoder
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -202,6 +204,19 @@ def test_storage_row_decoded_by_1_6_still_renders():
 def test_storage_shape_the_decoder_does_not_know_keeps_every_column():
     st = _decode("[STORAGE]\nX 0 5 0 NEWSHAPE 1 2 3 4 5\n")["storage"][0]
     assert st["curve_params"] == ["1", "2", "3", "4", "5"] and "surcharge_depth" not in st
+
+
+@pytest.mark.parametrize("shape", ["PARABOLIC", "PARABOLOID", "paraboloid"])
+def test_paraboloid_storage_tail_is_named_and_written_back_as_read(shape):
+    # The engine reads PARABOLIC (text.h); the 5.2 manual writes PARABOLOID.
+    row = f"ST7 90 10 0 {shape} 20 30 4 1.5 0.8 3.5 0.2 0.3"
+    st = _decode(f"[STORAGE]\n{row}\n")["storage"][0]
+    assert st["curve_type"] == shape
+    assert st["curve_params"] == ["20", "30", "4"]
+    assert (st["surcharge_depth"], st["evap_factor"]) == ("1.5", "0.8")
+    assert (st["seepage_suction"], st["seepage_ksat"], st["seepage_imd"]) == (
+        "3.5", "0.2", "0.3")
+    assert _rows(_encode({"storage": [st]}))["STORAGE"] == [row.split()]
 
 
 def test_weir_coefficient_curve_is_its_own_field():

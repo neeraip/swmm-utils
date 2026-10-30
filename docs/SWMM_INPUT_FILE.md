@@ -351,7 +351,8 @@ OUT2             84.5       FIXED      86.0             NO
    - **TABULAR**: Use curve of depth vs. area
    - **CYLINDRICAL**: Constant area
    - **CONICAL**: Conical shape
-   - **PARABOLIC**: Paraboloid shape
+   - **PARABOLIC**: Paraboloid shape. The engine reads `PARABOLIC`; the 5.2 manual spells it
+     `PARABOLOID`, which the decoder also reads. The shape is written back as read.
    - **PYRAMIDAL**: Pyramid shape
 6. **Curve/Params**: Curve name (TABULAR) or three values: `A1 A2 A0` (FUNCTIONAL) or `L W Z`
    (the other shapes)
