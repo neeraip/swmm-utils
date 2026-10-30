@@ -461,9 +461,17 @@ class SwmmInputEncoder:
         self._write_section_header(file, "ADJUSTMENTS")
         file.write(";;Parameter  Monthly Values\n")
         for key, value in adj.items():
-            if value == "" or value is None:
+            if key == "subcatchment_patterns" or value == "" or value is None:
                 continue
             file.write(f"{key.upper():<12} {value}\n")
+        for row in adj.get("subcatchment_patterns") or []:
+            adj_type = self._get_field(row, "type")
+            subcatchment = self._get_field(row, "subcatchment")
+            pattern = self._get_field(row, "pattern")
+            file.write(
+                f"{str(adj_type).upper():<12} {subcatchment:<16} {pattern}"
+                f"{self._extra(row)}\n"
+            )
 
     def _write_gwf(self, model: Dict[str, Any], file: TextIO):
         """Write [GWF] section: one custom groundwater flow equation per row."""
@@ -667,7 +675,7 @@ class SwmmInputEncoder:
         if "infiltrations" in model and model["infiltrations"]:
             self._write_section_header(file, "INFILTRATION")
             file.write(
-                ";;Subcatchment   Param1     Param2     Param3     Param4     Param5    \n"
+                ";;Subcatchment   Param1     Param2     Param3     Param4     Param5     Method\n"
             )
 
             for infil in model["infiltrations"]:
@@ -690,9 +698,13 @@ class SwmmInputEncoder:
                     param4 = self._get_field(infil, "param4", default="")
                     param5 = self._get_field(infil, "param5", default="")
 
+                # SWMM 5.2 reads a row's own method from its last column.
+                method = self._get_field(infil, "method", default="")
+                method = f" {method}" if method else ""
                 file.write(
                     f"{subcatchment:<16} {param1:<10} {param2:<10} "
-                    f"{param3:<10} {param4:<10} {param5}{self._extra(infil)}\n"
+                    f"{param3:<10} {param4:<10} {param5}{self._extra(infil)}"
+                    f"{method}\n"
                 )
 
     def _write_junctions(self, model: Dict[str, Any], file: TextIO):
@@ -753,7 +765,7 @@ class SwmmInputEncoder:
         if "storage" in model and model["storage"]:
             self._write_section_header(file, "STORAGE")
             file.write(
-                ";;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Name/Params            \n"
+                ";;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Name/Params            SurDepth Fevap Psi Ksat IMD\n"
             )
 
             for storage in model["storage"]:
@@ -770,12 +782,39 @@ class SwmmInputEncoder:
                 )
                 curve_params = storage.get("curve_params", [])
                 params = " ".join(curve_params) if curve_params else ""
+                tail = self._storage_tail(storage)
 
                 self._maybe_write_description(file, storage)
                 file.write(
                     f"{name:<16} {elevation:<8} {max_depth:<10} "
-                    f"{init_depth:<10} {curve_type:<10} {params}\n"
+                    f"{init_depth:<10} {curve_type:<10} {params}{tail}"
+                    f"{self._extra(storage)}\n"
                 )
+
+    @staticmethod
+    def _storage_tail(storage: Dict[str, Any]) -> str:
+        """A storage row's columns after its shape: SurDepth Fevap seepage.
+
+        The columns are positional, so one left blank before a filled one
+        is written as 0, the engine's default. Seepage is Psi Ksat IMD, or
+        Ksat alone when only it is given.
+        """
+
+        def value(key: str) -> Optional[str]:
+            found = storage.get(key)
+            return None if found is None or found == "" else str(found)
+
+        seepage = [value(k) for k in ("seepage_suction", "seepage_ksat", "seepage_imd")]
+        if seepage[0] is None and seepage[2] is None:
+            seepage = [seepage[1]] if seepage[1] is not None else []
+        else:
+            seepage = [v if v is not None else "0" for v in seepage]
+        cols = [value("surcharge_depth"), value("evap_factor")] + seepage
+        while cols and cols[-1] is None:
+            cols.pop()
+        if not cols:
+            return ""
+        return " " + " ".join(v if v is not None else "0" for v in cols)
 
     def _write_dividers(self, model: Dict[str, Any], file: TextIO):
         """Write [DIVIDERS] section.
@@ -897,7 +936,7 @@ class SwmmInputEncoder:
         if "weirs" in model and model["weirs"]:
             self._write_section_header(file, "WEIRS")
             file.write(
-                ";;Name           From Node        To Node          Type         CrestHt    Qcoeff     Gated    EndCon   EndCoeff   Surcharge  RoadWidth  RoadSurf  \n"
+                ";;Name           From Node        To Node          Type         CrestHt    Qcoeff     Gated    EndCon   EndCoeff   Surcharge  RoadWidth  RoadSurf  CoeffCurve\n"
             )
 
             for weir in model["weirs"]:
@@ -919,13 +958,25 @@ class SwmmInputEncoder:
                     weir, "road_width", "roadWidth", default=""
                 )
                 road_surf = self._get_field(weir, "road_surf", "roadSurf", default="")
+                coeff_curve = self._get_field(
+                    weir, "coeff_curve", "coeffCurve", default=""
+                )
+                if coeff_curve:
+                    # The curve is the 13th column: the road columns before
+                    # it can't be left blank. "*" is read as no value, but a
+                    # ROADWAY weir parses its width as a number.
+                    if road_width == "":
+                        road_width = "0" if str(weir_type).upper() == "ROADWAY" else "*"
+                    if road_surf == "":
+                        road_surf = "*"
+                    coeff_curve = f" {coeff_curve}"
 
                 self._maybe_write_description(file, weir)
                 file.write(
                     f"{name:<16} {from_node:<16} {to_node:<16} "
                     f"{weir_type:<12} {crest_height:<10} {discharge_coeff:<10} "
                     f"{gated:<8} {end_con:<8} {end_coeff:<10} {surcharge:<10} {road_width:<10} {road_surf}"
-                    f"{self._extra(weir)}\n"
+                    f"{coeff_curve}{self._extra(weir)}\n"
                 )
 
     def _write_xsections(self, model: Dict[str, Any], file: TextIO):

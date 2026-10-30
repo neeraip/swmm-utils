@@ -12,6 +12,23 @@ AQUIFER_FIELDS = (
     "etu", "ets", "seep", "ebot", "egw", "umc",
 )
 
+# The words SWMM 5.2 reads as a row's own method at the end of an
+# [INFILTRATION] row (infil.c, InfilModelWords).
+INFILTRATION_METHODS = frozenset({
+    "HORTON", "MODIFIED_HORTON", "GREEN_AMPT",
+    "MODIFIED_GREEN_AMPT", "CURVE_NUMBER",
+})
+
+# SWMM 5.2's per-subcatchment [ADJUSTMENTS] rows: ``Type Subcatch Pattern``.
+SUBCATCHMENT_ADJUSTMENTS = frozenset({"N-PERV", "DSTORE", "INFIL"})
+
+# How many values each [STORAGE] shape takes after its keyword (node.c):
+# a curve name, A1 A2 A0, or L W Z.
+STORAGE_SHAPE_PARAMS = {
+    "TABULAR": 1, "FUNCTIONAL": 3, "CYLINDRICAL": 3,
+    "CONICAL": 3, "PARABOLIC": 3, "PYRAMIDAL": 3,
+}
+
 
 def _keep_extra(entry: Dict[str, Any], parts: List[str], used: int) -> None:
     """Keep the tokens after a row's last known column under ``extra``.
@@ -419,16 +436,32 @@ class SwmmInputDecoder:
     def _parse_adjustments(self, model: dict, data: List[str]):
         """Parse [ADJUSTMENTS] section.
 
-        Each line is one of TEMPERATURE / EVAPORATION / RAINFALL /
-        CONDUCTIVITY followed by 12 monthly values. Stored as a dict
-        keyed by lowercased token with the values space-joined.
+        TEMPERATURE / EVAPORATION / RAINFALL / CONDUCTIVITY rows hold 12
+        monthly values, stored keyed by the lowercased word with the
+        values space-joined. SWMM 5.2's ``N-PERV``, ``DSTORE`` and
+        ``INFIL`` rows name a subcatchment and a pattern, and a model has
+        one per subcatchment, so they go in order under
+        ``subcatchment_patterns`` as ``{type, subcatchment, pattern}``.
+        Keyed by their word, all but the last of each were lost.
         """
         adjustments: Dict[str, Any] = {}
+        patterns: List[Dict[str, Any]] = []
         for line in data:
             parts = line.split()
             if not parts:
                 continue
+            if parts[0].upper() in SUBCATCHMENT_ADJUSTMENTS and len(parts) >= 3:
+                row = {
+                    "type": parts[0].upper(),
+                    "subcatchment": parts[1],
+                    "pattern": parts[2],
+                }
+                _keep_extra(row, parts, 3)
+                patterns.append(row)
+                continue
             adjustments[parts[0].lower()] = " ".join(parts[1:])
+        if patterns:
+            adjustments["subcatchment_patterns"] = patterns
         model["adjustments"] = adjustments
 
     def _parse_gwf(self, model: dict, data: List[str]):
@@ -616,11 +649,21 @@ class SwmmInputDecoder:
         model["subareas"] = subareas
 
     def _parse_infiltration(self, model: dict, data: List[str]):
-        """Parse [INFILTRATION] section."""
+        """Parse [INFILTRATION] section.
+
+        SWMM 5.2 row: ``Subcatch P1 P2 P3 [P4 P5] [Method]``. A method word
+        as the last column (after at least three parameters, as infil.c
+        reads it) is the row's own method, kept as ``method``; without
+        one the row uses [OPTIONS] INFILTRATION.
+        """
         infiltrations = []
         for line in data:
             parts = line.split()
             if len(parts) >= 4:
+                method = None
+                if len(parts) >= 5 and parts[-1].upper() in INFILTRATION_METHODS:
+                    method = parts[-1]
+                    parts = parts[:-1]
                 infil = {
                     "subcatchment": parts[0],
                     "param1": parts[1],
@@ -632,6 +675,8 @@ class SwmmInputDecoder:
                 if len(parts) > 5:
                     infil["param5"] = parts[5]
                 _keep_extra(infil, parts, 6)
+                if method is not None:
+                    infil["method"] = method
                 infiltrations.append(infil)
         model["infiltrations"] = infiltrations
 
@@ -696,7 +741,18 @@ class SwmmInputDecoder:
         model["outfalls"] = outfalls
 
     def _parse_storage(self, model: dict, data: List[str]):
-        """Parse [STORAGE] section."""
+        """Parse [STORAGE] section.
+
+        SWMM 5.2 row: ``Name Elev MaxDepth InitDepth Shape {Curve | A1 A2
+        A0 | L W Z} [SurDepth [Fevap [Psi Ksat IMD | Ksat]]]``.
+        ``curve_params`` holds the shape's own values; the columns after
+        them are ``surcharge_depth``, ``evap_factor`` and the seepage
+        loss ``seepage_suction``, ``seepage_ksat``, ``seepage_imd`` (a
+        single value there is Ksat alone, as exfil.c reads it). SWMM 5.1
+        has the ponded area where 5.2 has SurDepth; 5.2 reads that column
+        as the surcharge depth, so it is kept under that name. A shape
+        the decoder doesn't know keeps every column in ``curve_params``.
+        """
         storage_nodes = []
         for line in data:
             parts = line.split()
@@ -707,8 +763,27 @@ class SwmmInputDecoder:
                     "max_depth": parts[2],
                     "init_depth": parts[3],
                     "curve_type": parts[4],
-                    "curve_params": parts[5:],
                 }
+                count = STORAGE_SHAPE_PARAMS.get(parts[4].upper())
+                if count is None:
+                    storage["curve_params"] = parts[5:]
+                    storage_nodes.append(storage)
+                    continue
+                end = 5 + count
+                storage["curve_params"] = parts[5:end]
+                rest = parts[end:]
+                if rest:
+                    storage["surcharge_depth"] = rest.pop(0)
+                if rest:
+                    storage["evap_factor"] = rest.pop(0)
+                if len(rest) == 1:
+                    storage["seepage_ksat"] = rest.pop(0)
+                elif len(rest) >= 3:
+                    storage["seepage_suction"] = rest.pop(0)
+                    storage["seepage_ksat"] = rest.pop(0)
+                    storage["seepage_imd"] = rest.pop(0)
+                if rest:
+                    storage["extra"] = rest
                 storage_nodes.append(storage)
         model["storage"] = storage_nodes
 
@@ -853,7 +928,9 @@ class SwmmInputDecoder:
                     weir["road_width"] = parts[10]
                 if len(parts) > 11:
                     weir["road_surf"] = parts[11]
-                _keep_extra(weir, parts, 12)
+                if len(parts) > 12:
+                    weir["coeff_curve"] = parts[12]
+                _keep_extra(weir, parts, 13)
                 weirs.append(weir)
         model["weirs"] = weirs
 

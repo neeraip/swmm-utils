@@ -236,7 +236,12 @@ S2               0.013      0.20       0.06       0.15       30         OUTLET
 ### [INFILTRATION]
 **Purpose**: Infiltration parameters for pervious areas
 
-**Format**: Depends on infiltration model selected in [OPTIONS]
+**Format**: Depends on infiltration model selected in [OPTIONS], or on the row's own method. In SWMM
+5.2 a row may end with a method (`HORTON`, `MODIFIED_HORTON`, `GREEN_AMPT`, `MODIFIED_GREEN_AMPT`,
+`CURVE_NUMBER`) that overrides [OPTIONS] INFILTRATION for that subcatchment.
+
+**Decoded as**: `subcatchment`, `param1` to `param5` (as many as the row has), and `method` when the
+row names one. Without it the row uses [OPTIONS] INFILTRATION.
 
 #### HORTON Model
 `Subcatchment  MaxRate  MinRate  Decay  DryTime  MaxInfil`
@@ -271,6 +276,7 @@ S2               0.013      0.20       0.06       0.15       30         OUTLET
 ;;-------------- ---------- ---------- ----------
 S1               3.5        0.50       0.25
 S2               4.0        0.40       0.28
+S3               75         0.5        7          CURVE_NUMBER
 ```
 
 ---
@@ -333,7 +339,7 @@ OUT2             84.5       FIXED      86.0             NO
 ### [STORAGE]
 **Purpose**: Storage units (e.g., detention ponds, tanks, reservoirs)
 
-**Format**: `Name  Elev  MaxDepth  InitDepth  Shape  Curve/Params...  [Fevap]  [Psi]  [Ksat]  [IMD]`
+**Format**: `Name  Elev  MaxDepth  InitDepth  Shape  Curve/Params...  [SurDepth]  [Fevap]  [Psi  Ksat  IMD]`
 
 **Columns**:
 1. **Name**: Storage unit identifier
@@ -345,21 +351,29 @@ OUT2             84.5       FIXED      86.0             NO
    - **TABULAR**: Use curve of depth vs. area
    - **CYLINDRICAL**: Constant area
    - **CONICAL**: Conical shape
-   - **PARABOLOID**: Paraboloid shape
+   - **PARABOLIC**: Paraboloid shape
    - **PYRAMIDAL**: Pyramid shape
-6. **Curve/Params**: Curve name or shape coefficients
-7. **Fevap**: (Optional) Fraction of evaporation
-8. **Psi**: (Optional) Suction head for exfiltration (in or mm)
-9. **Ksat**: (Optional) Hydraulic conductivity for exfiltration
-10. **IMD**: (Optional) Initial moisture deficit
+6. **Curve/Params**: Curve name (TABULAR) or three values: `A1 A2 A0` (FUNCTIONAL) or `L W Z`
+   (the other shapes)
+7. **SurDepth**: (Optional) Surcharge depth. SWMM 5.1 has the ponded area in this column; 5.2
+   reads it as the surcharge depth.
+8. **Fevap**: (Optional) Fraction of evaporation
+9. **Psi**: (Optional) Suction head for seepage (in or mm)
+10. **Ksat**: (Optional) Hydraulic conductivity for seepage. A single value after Fevap is Ksat.
+11. **IMD**: (Optional) Initial moisture deficit
+
+**Decoded as**: `name`, `elevation`, `max_depth`, `init_depth`, `curve_type`, `curve_params` (the
+shape's own values only), and when present `surcharge_depth`, `evap_factor`, `seepage_suction`,
+`seepage_ksat`, `seepage_imd`. A shape the decoder doesn't know keeps every column in
+`curve_params`. The encoder writes a blank column before a filled one as 0, the engine's default.
 
 **Example**:
 ```
 [STORAGE]
 ;;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Name/Params
 ;;-------------- -------- ---------- ---------- ---------- --------------------
-POND1            90.0     12.0       0.0        TABULAR    POND1_CURVE
-TANK1            88.0     15.0       2.0        CYLINDRICAL 5000
+POND1            90.0     12.0       0.0        TABULAR    POND1_CURVE  0  0.5  3.5  0.2  0.3
+TANK1            88.0     15.0       2.0        CYLINDRICAL 80 60 0      1.5
 ```
 
 ---
@@ -445,7 +459,7 @@ OR1              POND1            J3               SIDE         2.0        0.65 
 ### [WEIRS]
 **Purpose**: Overflow structures
 
-**Format**: `Name  FromNode  ToNode  Type  CrestHt  Qcoeff  Gated  EndCon  EndCoeff  Surcharge  [RoadWidth]  [RoadSurf]`
+**Format**: `Name  FromNode  ToNode  Type  CrestHt  Qcoeff  Gated  EndCon  EndCoeff  Surcharge  [RoadWidth]  [RoadSurf]  [CoeffCurve]`
 
 **Columns**:
 1. **Name**: Weir identifier
@@ -465,6 +479,9 @@ OR1              POND1            J3               SIDE         2.0        0.65 
 10. **Surcharge**: YES (allow surcharge) or NO
 11. **RoadWidth**: (Optional) Road width for ROADWAY type
 12. **RoadSurf**: (Optional) Road surface for ROADWAY type
+13. **CoeffCurve**: (Optional, SWMM 5.2) Weir curve of discharge coefficient against head, decoded
+    as `coeff_curve`. The road columns before it are written as `*` when blank (a ROADWAY weir's
+    width as 0, since the engine reads it as a number).
 
 **Example**:
 ```
@@ -1502,15 +1519,22 @@ SNOWMELT   32.0  0.0  50.0  0.6  0.0  0.0  0.0
 ---
 
 ### [ADJUSTMENTS]
-**Purpose**: Monthly climate adjustment factors
+**Purpose**: Monthly climate adjustment factors, and (SWMM 5.2) monthly patterns per subcatchment
 
-**Format**: `Parameter  Jan  Feb  Mar  Apr  May  Jun  Jul  Aug  Sep  Oct  Nov  Dec`
+**Format**: `Parameter  Jan  Feb  Mar  Apr  May  Jun  Jul  Aug  Sep  Oct  Nov  Dec`, or
+`N-PERV|DSTORE|INFIL  Subcatchment  Pattern`
 
 **Parameters**:
 - **TEMPERATURE**: Temperature adjustment (degrees F or C)
 - **EVAPORATION**: Evaporation factor
 - **RAINFALL**: Rainfall factor
 - **CONDUCTIVITY**: Soil hydraulic conductivity factor
+- **N-PERV**, **DSTORE**, **INFIL**: A monthly pattern adjusting one subcatchment's pervious
+  roughness, depression storage or infiltration rate
+
+**Decoded as**: a dict with the monthly rows keyed by their lowercased word, values space-joined
+(`"temperature": "0.0 0.0 ..."`), and the per-subcatchment rows in order under
+`subcatchment_patterns` as `{"type": "N-PERV", "subcatchment": "S1", "pattern": "P1"}`.
 
 **Example**:
 ```
@@ -1518,6 +1542,8 @@ SNOWMELT   32.0  0.0  50.0  0.6  0.0  0.0  0.0
 ;;Parameter   Jan  Feb  Mar  Apr  May  Jun  Jul  Aug  Sep  Oct  Nov  Dec
 TEMPERATURE   0.0  0.0  0.0  0.0  0.0  2.0  3.0  3.0  2.0  0.0  0.0  0.0
 RAINFALL      1.0  1.0  1.0  1.0  1.0  1.2  1.2  1.2  1.0  1.0  1.0  1.0
+N-PERV        S1   NPERV_PAT
+N-PERV        S2   NPERV_PAT
 ```
 
 ---
