@@ -694,6 +694,22 @@ Tested on diverse simulation results:
 
 ## Changelog
 
+### 1.7.0 (unreleased)
+
+Input files, SWMM 5.2 columns that were kept unnamed or lost:
+
+- `[INFILTRATION]`: a row's own method (its last column) is `method`, where 1.6 kept it under
+  `extra`.
+- `[ADJUSTMENTS]`: the per-subcatchment `N-PERV`, `DSTORE` and `INFIL` rows are kept in order under
+  `adjustments["subcatchment_patterns"]` as `{type, subcatchment, pattern}`. 1.6 keyed them by
+  their first word and kept only the last of each type. Monthly rows are unchanged.
+- `[STORAGE]`: `curve_params` holds the shape's own values only (a curve name, or three values);
+  the columns after them are `surcharge_depth`, `evap_factor`, `seepage_suction`, `seepage_ksat`
+  and `seepage_imd`. 1.6 kept them all in `curve_params`.
+- `[WEIRS]`: the coefficient curve (13th column) is `coeff_curve`.
+
+Rows without these columns decode as before. Rows decoded by 1.6 still encode as they did.
+
 ### Latest Changes (Feb 2026)
 
 **Output File Parser Bug Fixes:**
