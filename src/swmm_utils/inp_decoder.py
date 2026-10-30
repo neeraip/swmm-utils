@@ -33,6 +33,23 @@ STORAGE_SHAPE_PARAMS = {
 }
 
 
+# A token as SWMM's getTokens reads one: a quoted string, which may hold
+# spaces, or a run of non-blank characters.
+_TOKEN = re.compile(r'"[^"]*"|\S+')
+
+
+def _tokens(line: str) -> List[str]:
+    """Split a row into tokens, a quoted string staying one token, quotes kept."""
+    return _TOKEN.findall(line)
+
+
+def _unquote(token: str) -> str:
+    """A token's text without the quotes around it."""
+    if token.startswith('"'):
+        return token[1:-1] if len(token) >= 2 and token.endswith('"') else token[1:]
+    return token
+
+
 def _keep_extra(entry: Dict[str, Any], parts: List[str], used: int) -> None:
     """Keep the tokens after a row's last known column under ``extra``.
 
@@ -416,7 +433,8 @@ class SwmmInputDecoder:
         """
         temperature: Dict[str, Any] = {}
         for line in data:
-            parts = line.split()
+            # ``FILE "path" [start]``: a quoted path may hold spaces.
+            parts = _tokens(line)
             if not parts:
                 continue
             head = parts[0].upper()
@@ -992,7 +1010,8 @@ class SwmmInputDecoder:
         timeseries = {}
 
         for line in data:
-            parts = line.split()
+            # ``Name FILE "path"``: a quoted path may hold spaces.
+            parts = _tokens(line)
             if len(parts) >= 3:
                 # Format: Name Date Time Value
                 # If 4 parts: Name Date Time Value
@@ -1134,14 +1153,24 @@ class SwmmInputDecoder:
         model["symbols"] = symbols
 
     def _parse_labels(self, model: dict, data: List[str]):
-        """Parse [LABELS] section."""
+        """Parse [LABELS] section.
+
+        Row: ``X Y "Label" [Anchor Font Size Bold Italic]``. ``text`` is
+        the label without its quotes (it may hold spaces); ``anchor`` keeps
+        everything after the label as written. The encoder quotes ``text``.
+        """
         labels = []
         for line in data:
-            parts = line.split(None, 3)
-            if len(parts) >= 3:
-                label = {"x": parts[0], "y": parts[1], "text": parts[2]}
-                if len(parts) > 3:
-                    label["anchor"] = parts[3]
+            found = list(_TOKEN.finditer(line))
+            if len(found) >= 3:
+                label = {
+                    "x": found[0].group(),
+                    "y": found[1].group(),
+                    "text": _unquote(found[2].group()),
+                }
+                tail = line[found[2].end():].strip()
+                if tail:
+                    label["anchor"] = tail
                 labels.append(label)
         model["labels"] = labels
 
@@ -1225,12 +1254,16 @@ class SwmmInputDecoder:
         model["backdrop"] = backdrop
 
     def _parse_profiles(self, model: dict, data: List[str]):
-        """Parse [PROFILES] section."""
+        """Parse [PROFILES] section.
+
+        Row: ``"Name" Link1 Link2 ...``; ``name`` is the quoted name
+        without its quotes (it may hold spaces).
+        """
         profiles = []
         for line in data:
-            parts = line.split()
+            parts = _tokens(line)
             if len(parts) >= 2:
-                profile = {"name": parts[0], "links": parts[1:]}
+                profile = {"name": _unquote(parts[0]), "links": parts[1:]}
                 profiles.append(profile)
         model["profiles"] = profiles
 
@@ -1409,7 +1442,8 @@ class SwmmInputDecoder:
         """Parse [LID_USAGE] section."""
         lid_usage = []
         for line in data:
-            parts = line.split()
+            # The report file is quoted and may hold spaces.
+            parts = _tokens(line)
             if len(parts) >= 3:
                 entry: Dict[str, Any] = {
                     "subcatchment": parts[0],

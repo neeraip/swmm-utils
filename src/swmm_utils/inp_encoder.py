@@ -1199,9 +1199,14 @@ class SwmmInputEncoder:
             for label in model["labels"]:
                 x = self._get_field(label, "x", default="0")
                 y = self._get_field(label, "y", default="0")
-                text = self._get_field(label, "text", default="")
+                text = str(self._get_field(label, "text", default=""))
                 anchor = self._get_field(label, "anchor", default="")
-                file.write(f'{x:<17} {y:<18} "{text}" {anchor}\n')
+                # Before 1.7.1 the decoder kept the quotes in ``text``; such
+                # a value is written as it is rather than quoted again.
+                if not (len(text) >= 2 and text[0] == text[-1] == '"'):
+                    text = f'"{text}"'
+                tail = f" {anchor}" if anchor else ""
+                file.write(f"{x:<17} {y:<18} {text}{tail}\n")
 
     def _write_tags(self, model: Dict[str, Any], file: TextIO):
         """Write [TAGS] section."""
@@ -1297,7 +1302,11 @@ class SwmmInputEncoder:
             self._write_section_header(file, "PROFILES")
 
             for profile in model["profiles"]:
-                name = self._get_field(profile, "name")
+                name = str(self._get_field(profile, "name"))
+                # SWMM quotes a profile's name, which may hold spaces; a name
+                # decoded before 1.7.1 kept its opening quote.
+                if not name.startswith('"'):
+                    name = f'"{name}"'
                 links = profile.get("links", [])
                 links_str = " ".join(links) if links else ""
                 file.write(f"{name:<16} {links_str}\n")

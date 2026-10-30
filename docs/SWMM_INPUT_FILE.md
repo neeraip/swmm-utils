@@ -1251,6 +1251,11 @@ RG1              1500.000           5500.000
 2750.000           5250.000           "Zone A"
 ```
 
+**Decoded as**: `text` is the label without its quotes (it may hold spaces or be empty), and
+`anchor` keeps everything after the label as written (the GUI writes anchor, font, size, bold and
+italic there). The encoder writes `text` in one pair of quotes. SWMM has no escape for a quote
+inside a label.
+
 ---
 
 ### [BACKDROP]
@@ -1353,6 +1358,7 @@ Units      FEET
 - Used by SWMM GUI to create profile plots showing elevation changes along a sequence of links
 - Links should form a continuous path through the drainage network
 - Profiles are visualization tools and don't affect simulation results
+- `name` is decoded without its quotes and may hold spaces; the encoder quotes it
 
 ---
 
