@@ -351,7 +351,9 @@ OUT2             84.5       FIXED      86.0             NO
    - **TABULAR**: Use curve of depth vs. area
    - **CYLINDRICAL**: Constant area
    - **CONICAL**: Conical shape
-   - **PARABOLIC**: Paraboloid shape
+   - **PARABOLIC**: Paraboloid shape. The engine reads `PARABOLIC` and rejects `PARABOLOID`, the
+     5.2 manual's spelling. The decoder reads both and keeps the word as written in `curve_type`;
+     the encoder writes `PARABOLOID` (any case) as `PARABOLIC` so the file runs.
    - **PYRAMIDAL**: Pyramid shape
 6. **Curve/Params**: Curve name (TABULAR) or three values: `A1 A2 A0` (FUNCTIONAL) or `L W Z`
    (the other shapes)
@@ -1249,6 +1251,11 @@ RG1              1500.000           5500.000
 2750.000           5250.000           "Zone A"
 ```
 
+**Decoded as**: `text` is the label without its quotes (it may hold spaces or be empty), and
+`anchor` keeps everything after the label as written (the GUI writes anchor, font, size, bold and
+italic there). The encoder writes `text` in one pair of quotes. SWMM has no escape for a quote
+inside a label.
+
 ---
 
 ### [BACKDROP]
@@ -1351,6 +1358,7 @@ Units      FEET
 - Used by SWMM GUI to create profile plots showing elevation changes along a sequence of links
 - Links should form a continuous path through the drainage network
 - Profiles are visualization tools and don't affect simulation results
+- `name` is decoded without its quotes and may hold spaces; the encoder quotes it
 
 ---
 

@@ -694,7 +694,24 @@ Tested on diverse simulation results:
 
 ## Changelog
 
-### 1.7.0 (unreleased)
+### 1.7.1 (unreleased)
+
+- `[STORAGE]`: a `PARABOLOID` row, as the SWMM 5.2 manual spells the shape, is split into
+  `curve_params` (L W Z) and the named tail columns like a `PARABOLIC` row, the keyword the engine
+  reads. 1.7.0 knew only `PARABOLIC` and kept a `PARABOLOID` row's tail in `curve_params`.
+  `curve_type` keeps the word as read; the encoder writes `PARABOLOID` (any case) as `PARABOLIC`,
+  since the engine rejects `PARABOLOID`. Other shapes are written as read.
+- `[LABELS]`: `text` is the label without its quotes. 1.7.0 kept the quotes and the encoder added
+  another pair, so each decode → encode wrapped the label in one more pair; a label with spaces
+  was split at the first space. A `text` still in quotes (decoded by 1.7.0 or earlier) is written
+  as it is, not quoted again.
+- `[PROFILES]`: a quoted name with spaces is one `name`, without its quotes; the encoder quotes it.
+  1.7.0 split it at the first space, leaving the rest in `links`.
+- A quoted path with spaces stays one value: a `[TIMESERIES]` `FILE` path, a `[LID_USAGE]` report
+  file (1.7.0 shifted the columns after it) and a `[TEMPERATURE]` `FILE` path (1.7.0 collapsed
+  repeated spaces in it).
+
+### 1.7.0
 
 Input files, SWMM 5.2 columns that were kept unnamed or lost:
 
