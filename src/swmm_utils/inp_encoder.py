@@ -780,6 +780,11 @@ class SwmmInputEncoder:
                 curve_type = self._get_field(
                     storage, "curve_type", "curveType", default="TABULAR"
                 )
+                # The 5.2 manual spells the shape PARABOLOID, but the engine
+                # only reads PARABOLIC (text.h, w_PARABOLOID) and rejects the
+                # manual's word with ERR_KEYWORD.
+                if str(curve_type).upper() == "PARABOLOID":
+                    curve_type = "PARABOLIC"
                 curve_params = storage.get("curve_params", [])
                 params = " ".join(curve_params) if curve_params else ""
                 tail = self._storage_tail(storage)

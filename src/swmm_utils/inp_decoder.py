@@ -26,7 +26,7 @@ SUBCATCHMENT_ADJUSTMENTS = frozenset({"N-PERV", "DSTORE", "INFIL"})
 # a curve name, A1 A2 A0, or L W Z. The engine's keyword for the
 # paraboloid is PARABOLIC (text.h defines w_PARABOLOID as "PARABOLIC");
 # the 5.2 manual spells it PARABOLOID, so a row written from the manual is
-# split the same way. The shape is written back as read.
+# split the same way. The encoder writes it as PARABOLIC.
 STORAGE_SHAPE_PARAMS = {
     "TABULAR": 1, "FUNCTIONAL": 3, "CYLINDRICAL": 3,
     "CONICAL": 3, "PARABOLIC": 3, "PARABOLOID": 3, "PYRAMIDAL": 3,

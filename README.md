@@ -698,8 +698,9 @@ Tested on diverse simulation results:
 
 - `[STORAGE]`: a `PARABOLOID` row, as the SWMM 5.2 manual spells the shape, is split into
   `curve_params` (L W Z) and the named tail columns like a `PARABOLIC` row, the keyword the engine
-  reads. 1.7.0 knew only `PARABOLIC` and kept a `PARABOLOID` row's tail in `curve_params`. The
-  shape is written back as read.
+  reads. 1.7.0 knew only `PARABOLIC` and kept a `PARABOLOID` row's tail in `curve_params`.
+  `curve_type` keeps the word as read; the encoder writes `PARABOLOID` (any case) as `PARABOLIC`,
+  since the engine rejects `PARABOLOID`. Other shapes are written as read.
 
 ### 1.7.0
 
