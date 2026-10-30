@@ -694,7 +694,14 @@ Tested on diverse simulation results:
 
 ## Changelog
 
-### 1.7.0 (unreleased)
+### 1.7.1 (unreleased)
+
+- `[STORAGE]`: a `PARABOLOID` row, as the SWMM 5.2 manual spells the shape, is split into
+  `curve_params` (L W Z) and the named tail columns like a `PARABOLIC` row, the keyword the engine
+  reads. 1.7.0 knew only `PARABOLIC` and kept a `PARABOLOID` row's tail in `curve_params`. The
+  shape is written back as read.
+
+### 1.7.0
 
 Input files, SWMM 5.2 columns that were kept unnamed or lost:
 
